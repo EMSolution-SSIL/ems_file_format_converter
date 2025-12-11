@@ -1,0 +1,24 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test cache
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# VS Code settings (とりあえず全部無視する場合)
+.vscode/
+
+# OSごとのゴミ
+.DS_Store
+Thumbs.db

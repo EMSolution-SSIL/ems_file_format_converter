@@ -1,0 +1,7 @@
+[project]
+name = "ems-file-format-converter"
+version = "0.1.0"
+dependencies = ["meshio>=5.0"]
+
+[project.scripts]
+ems-file-format-converter = "ems_file_format_converter.cli:main"
