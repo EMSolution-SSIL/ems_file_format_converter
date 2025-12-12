@@ -39,10 +39,12 @@ def read_unv(path: str | Path) -> meshio.Mesh:
     it = iter(lines)
     nodes: Dict[int, Tuple[float, float, float]] = {}
     cells_by_type: Dict[str, List[List[int]]] = {}
+    elem_ids_by_type: Dict[str, List[int]] = {}
+    elem_props1_by_type: Dict[str, List[int]] = {}
+    elem_props2_by_type: Dict[str, List[int]] = {}
 
     def _read_nodes_block():
-        # 2411 typically has an ID line followed by coordinate line(s)
-        current_id: int | None = None
+        # 2411: first line "id 0 0 15" (metadata ignored), second line has x y z
         for raw in it:
             s = raw.strip()
             if s.startswith("-1"):
@@ -50,29 +52,29 @@ def read_unv(path: str | Path) -> meshio.Mesh:
             if not s:
                 continue
             parts = s.split()
-            # Try integer id first token
+            # Expect first token to be node id
             try:
-                nid_candidate = int(parts[0])
-                # If line has more floats after, this could be combined form
-                if len(parts) >= 4:
-                    x, y, z = map(float, parts[1:4])
-                    nodes[nid_candidate] = (x, y, z)
-                    current_id = None
-                else:
-                    current_id = nid_candidate
-                continue
+                nid = int(parts[0])
             except ValueError:
-                pass
-            # If not integer first token, try coordinates with stored id
-            if current_id is not None:
-                vals = [float(x) for x in parts]
-                if len(vals) >= 3:
-                    x, y, z = vals[:3]
-                    nodes[current_id] = (x, y, z)
-                    current_id = None
+                continue
+            # Read the next line for coordinates
+            coord_line = next(it, "").strip()
+            if not coord_line:
+                # Skip until we find a non-empty coordinate line or terminator
+                while coord_line == "":
+                    coord_line = next(it, "").strip()
+                    if coord_line.startswith("-1"):
+                        break
+            if coord_line and not coord_line.startswith("-1"):
+                try:
+                    x, y, z = map(float, coord_line.split()[:3])
+                    nodes[nid] = (x, y, z)
+                except Exception:
+                    # If parsing fails, ignore this node entry
+                    pass
 
     def _read_elements_block():
-        # block 2412: variable header lines; for the sample, assume: id, type, mat, color, n1..nN (one or multiple lines)
+        # 2412: header line then one or more lines of node ids (8 per line)
         for raw in it:
             s = raw.strip()
             if s.startswith("-1"):
@@ -80,32 +82,50 @@ def read_unv(path: str | Path) -> meshio.Mesh:
             if not s:
                 continue
             parts = s.split()
-            # Require first token integer (element id)
+            # Header: eid, etype, prop1, prop2, 15, ncount
             try:
                 eid = int(parts[0])
-            except ValueError:
+                etype_code = int(parts[1])
+                prop1 = int(parts[2])
+                prop2 = int(parts[3])
+                ncount = int(parts[5])
+            except Exception:
+                # Not a valid header; skip line
                 continue
-            etype_code = int(parts[1])
             if etype_code not in UNV_TO_MESHIO:
-                # Skip unknown types gracefully
-                # Consume until terminator for this element
-                while True:
-                    try:
-                        nxt = next(it).strip()
-                    except StopIteration:
+                # Skip unknown types; consume node lines accordingly
+                # Read node ids lines until count satisfied or terminator
+                remaining = ncount
+                while remaining > 0:
+                    nxt = next(it, "")
+                    if not nxt:
                         break
-                    if not nxt or nxt.startswith("-1"):
+                    t = nxt.strip()
+                    if t.startswith("-1"):
                         break
+                    nums = t.split()
+                    remaining -= len(nums)
                 continue
-            # UNV etype_code mapping is complex; infer by connectivity length
-            if len(parts) >= 7:
-                conn = [int(p) for p in parts[6:]]
-            else:
-                conn = []
-            # For round-trip, expect nodes on same line as header written by our writer
             ctype, expected = UNV_TO_MESHIO[etype_code]
-            conn = conn[:expected]
-            cells_by_type.setdefault(ctype, []).append(conn)
+            # Read node ids across as many lines as necessary (8 per line typical)
+            conn_ids: List[int] = []
+            remaining = ncount
+            while remaining > 0:
+                nxt = next(it, "")
+                if not nxt:
+                    break
+                t = nxt.strip()
+                if t.startswith("-1"):
+                    break
+                nums = [int(x) for x in t.split()]
+                conn_ids.extend(nums)
+                remaining -= len(nums)
+            # Truncate or validate length against expected
+            conn_ids = conn_ids[:expected]
+            cells_by_type.setdefault(ctype, []).append(conn_ids)
+            elem_ids_by_type.setdefault(ctype, []).append(eid)
+            elem_props1_by_type.setdefault(ctype, []).append(prop1)
+            elem_props2_by_type.setdefault(ctype, []).append(prop2)
 
     for raw in it:
         s = raw.strip()
@@ -132,11 +152,38 @@ def read_unv(path: str | Path) -> meshio.Mesh:
     points = np.array([nodes[nid] for nid in sorted_node_ids], dtype=float)
 
     cells = []
+    cell_data: Dict[str, List[np.ndarray]] = {"id": [], "prop1": [], "prop2": []}
     for ctype, conn_list in cells_by_type.items():
-        data = np.array([[id2idx[n] for n in conn] for conn in conn_list], dtype=int)
+        # Map connectivity node IDs to zero-based indices; skip elements referencing missing nodes
+        mapped_conns: List[List[int]] = []
+        ids_kept: List[int] = []
+        props1_kept: List[int] = []
+        props2_kept: List[int] = []
+        for idx, conn in enumerate(conn_list):
+            try:
+                mapped = [id2idx[n] for n in conn]
+            except KeyError:
+                # Skip this element if any node id is missing
+                continue
+            mapped_conns.append(mapped)
+            # Keep aligned metadata when element is kept
+            if ctype in elem_ids_by_type and idx < len(elem_ids_by_type[ctype]):
+                ids_kept.append(int(elem_ids_by_type[ctype][idx]))
+            if ctype in elem_props1_by_type and idx < len(elem_props1_by_type[ctype]):
+                props1_kept.append(int(elem_props1_by_type[ctype][idx]))
+            if ctype in elem_props2_by_type and idx < len(elem_props2_by_type[ctype]):
+                props2_kept.append(int(elem_props2_by_type[ctype][idx]))
+        if not mapped_conns:
+            continue
+        data = np.asarray(mapped_conns, dtype=int)
         cells.append((ctype, data))
+        cell_data["id"].append(np.asarray(ids_kept, dtype=int))
+        cell_data["prop1"].append(np.asarray(props1_kept, dtype=int))
+        cell_data["prop2"].append(np.asarray(props2_kept, dtype=int))
 
-    return meshio.Mesh(points=points, cells=cells, point_data={"id": np.array(sorted_node_ids, int)})
+    return meshio.Mesh(
+        points=points, cells=cells, point_data={"id": np.array(sorted_node_ids, int)}, cell_data=cell_data
+    )
 
 
 def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
@@ -155,6 +202,16 @@ def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
 
     # Node IDs
     point_ids = None
+    # Element IDs per block (optional)
+    id_blocks: List[np.ndarray] = []
+    prop1_blocks: List[np.ndarray] = []
+    prop2_blocks: List[np.ndarray] = []
+    if isinstance(getattr(mesh, "cell_data", None), dict) and "id" in mesh.cell_data:
+        id_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["id"]]
+    if isinstance(getattr(mesh, "cell_data", None), dict) and "prop1" in mesh.cell_data:
+        prop1_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["prop1"]]
+    if isinstance(getattr(mesh, "cell_data", None), dict) and "prop2" in mesh.cell_data:
+        prop2_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["prop2"]]
     if isinstance(getattr(mesh, "point_data", None), dict) and "id" in mesh.point_data:
         pid = np.asarray(mesh.point_data["id"]).reshape(-1)
         if pid.size == len(mesh.points):
@@ -167,45 +224,70 @@ def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
     out.append("  2411\n")
     for i, (x, y, z) in enumerate(np.asarray(mesh.points, float)):
         nid = int(point_ids[i]) if point_ids is not None else i + 1
-        out.append(f"{nid:10d}{x:16.5e}{y:16.5e}{z:16.5e}\n")
+        out.append(f"{nid:10d}         0         0        15\n")
+        out.append(f"{x:25.12e}{y:25.12e}{z:25.12e}\n")
     out.append("    -1\n")
 
     # 2412 elements
     out.append("    -1\n")
     out.append("  2412\n")
     eid_counter = 1
-    for ctype, conn in cells:
+    for bidx, (ctype, conn) in enumerate(cells):
         # Map meshio type to UNV type code
         if ctype not in MESHIO_TO_UNV:
             raise ValueError(f"Unsupported cell type for UNV writer: {ctype}")
         etype, expected = MESHIO_TO_UNV[ctype]
-        for e in conn:
+        for eidx, e in enumerate(conn):
             eid = eid_counter
             eid_counter += 1
-            # Header-like line: id, type, mat, color, something, then nodelist
-            out.append(f"{eid:10d}{etype:10d}{0:10d}{0:10d}{0:10d}{0:10d}")
-            # node IDs
+            if id_blocks and bidx < len(id_blocks):
+                blk = id_blocks[bidx]
+                if blk is not None and blk.size == len(conn):
+                    eid = int(blk[eidx])
+            # Properties: default to 1 unless provided per block
+            prop1 = 1
+            prop2 = 1
+            if prop1_blocks and bidx < len(prop1_blocks):
+                p1b = prop1_blocks[bidx]
+                if p1b is not None and p1b.size == len(conn):
+                    prop1 = int(p1b[eidx])
+            if prop2_blocks and bidx < len(prop2_blocks):
+                p2b = prop2_blocks[bidx]
+                if p2b is not None and p2b.size == len(conn):
+                    prop2 = int(p2b[eidx])
+            node_ids = []
             for n in e[:expected]:
                 nid = int(point_ids[int(n)]) if point_ids is not None else int(n) + 1
-                out.append(f"{nid:10d}")
-            out.append("\n")
+                node_ids.append(nid)
+            # Header line: eid, etype, prop1, prop2, 15, count
+            out.append(f"{eid:10d}{etype:10d}{prop1:10d}{prop2:10d}{15:10d}{len(node_ids):10d}\n")
+            # Node ids lines: 8 per line, I10 formatting
+            for i in range(0, len(node_ids), 8):
+                chunk = node_ids[i : i + 8]
+                out.append("".join(f"{nid:10d}" for nid in chunk) + "\n")
     out.append("    -1\n")
 
     path.write_text("".join(out), encoding="utf-8")
 
 
 def read_unv_post(path: str | Path) -> List[dict]:
-    """Read UNV post data sections 55 (nodes) and 56 (elements) per step."""
+    """Read UNV post data with headers for sections 56 (elements) and 55 (nodes).
+
+    Each data entry uses the two-line block format:
+      - Line 1: "<ID> <N>" (ID is node/element id; N is data-per-line, typically 6 or 8)
+      - Line 2: six reals: x, y, z, |vec|, extra1, extra2
+      - If N > 6: read a third line with two more reals
+    """
     path = Path(path)
     with path.open() as f:
-        lines = f.readlines()
+        lines = [ln.rstrip() for ln in f]
 
     it = iter(lines)
     steps: List[dict] = []
 
-    def _read_data_block() -> Dict[int, Dict[str, np.ndarray | float]]:
-        data: Dict[int, Dict[str, np.ndarray | float]] = {}
-        # After header, values lines: id then values
+    def _read_entries() -> Dict[int, Dict[str, np.ndarray | float]]:
+        entries: Dict[int, Dict[str, np.ndarray | float]] = {}
+        # Read until terminator "-1" or next section header
         for raw in it:
             s = raw.strip()
             if not s:
@@ -213,119 +295,192 @@ def read_unv_post(path: str | Path) -> List[dict]:
             if s.startswith("-1"):
                 break
             parts = s.split()
-            # Skip lines that don't start with integer id
+            if len(parts) < 2:
+                # not a data header line
+                continue
             try:
                 idv = int(parts[0])
+                nvals = int(parts[1])
             except ValueError:
+                # not a data header line
                 continue
-            vals = [float(x) for x in parts[1:]]
-            vec = (vals + [0.0, 0.0, 0.0])[:3]
-            val = vals[-1] if vals else 0.0
-            data[idv] = {"vector": np.array(vec, float), "value": float(val)}
-        return data
+            # values line (six reals)
+            vals_line = next(it, "").strip()
+            vals: List[float] = []
+            if vals_line:
+                vals.extend(float(x) for x in vals_line.split())
+            # optional extra line for N>6
+            if nvals > 6:
+                extra_line = next(it, "").strip()
+                if extra_line:
+                    vals.extend(float(x) for x in extra_line.split())
+            # normalize
+            vals = vals + [0.0] * max(0, 4 - len(vals))
+            vx = float(vals[0]) if len(vals) > 0 else 0.0
+            vy = float(vals[1]) if len(vals) > 1 else 0.0
+            vz = float(vals[2]) if len(vals) > 2 else 0.0
+            absval = float(vals[3]) if len(vals) > 3 else 0.0
+            entries[idv] = {"vector": np.array([vx, vy, vz], float), "value": absval}
+        return entries
 
-    for raw in it:
+    while True:
+        try:
+            raw = next(it)
+        except StopIteration:
+            break
         s = raw.strip()
         if not s:
             continue
         if s == "-1":
+            # section separator
             continue
         if s.isdigit():
             sec = int(s)
-            if sec in (55, 56):
-                # Read name line
-                name_line = next(it).strip()
-                # Title line and 4 blank/title lines
-                _ = next(it)
-                _ = next(it)
-                _ = next(it)
-                _ = next(it)
-                # Parameters line
-                _ = next(it)
-                # Sub/step line
-                sub_line = next(it).strip()
-                # Time line
-                time_line = next(it).strip()
-                # Parse sub/step
-                sp = sub_line.split()
-                sub_step = int(sp[-2])
-                step = int(sp[-1])
-                time = float(time_line)
-                # Now data till -1
+            if sec in (56, 55):
+                # name/title
+                name_line = next(it, "").strip()
+                # title line and padding
+                _ = next(it, "")
+                _ = next(it, "")
+                _ = next(it, "")
+                _ = next(it, "")
+                # parameters line (contains data-per-line as last integer)
+                param_line = next(it, "").strip()
+                # sub/step line
+                sub_line = next(it, "").strip()
+                # time line
+                time_line = next(it, "").strip()
+                # parse sub/step/time
+                try:
+                    sp = sub_line.split()
+                    sub_step = int(sp[-2])
+                    step = int(sp[-1])
+                except Exception:
+                    sub_step, step = 1, 1
+                try:
+                    time = float(time_line)
+                except Exception:
+                    time = 0.0
+                entries = _read_entries()
                 if sec == 56:
-                    elems = _read_data_block()
-                    # Expect next section 55
-                    # Accumulate step record
-                    step_rec = {"step": step, "substep": sub_step, "time": time, "elements": elems, "nodes": {}}
-                    steps.append(step_rec)
-                elif sec == 55:
-                    nodes = _read_data_block()
+                    steps.append(
+                        {
+                            "step": step,
+                            "substep": sub_step,
+                            "time": time,
+                            "elements": entries,
+                            "nodes": {},
+                            "name56": name_line,
+                        }
+                    )
+                else:
+                    # 55
                     if not steps or steps[-1]["step"] != step:
-                        steps.append({"step": step, "substep": sub_step, "time": time, "elements": {}, "nodes": nodes})
+                        steps.append(
+                            {
+                                "step": step,
+                                "substep": sub_step,
+                                "time": time,
+                                "elements": {},
+                                "nodes": entries,
+                                "name55": name_line,
+                            }
+                        )
                     else:
-                        steps[-1]["nodes"] = nodes
+                        steps[-1]["nodes"] = entries
+                        steps[-1]["name55"] = name_line
             else:
-                # Skip other sections
-                for raw2 in it:
-                    if raw2.strip().startswith("-1"):
-                        break
+                # skip other sections
+                continue
 
     return steps
 
 
-def write_unv_post(path: str | Path, steps: List[dict], mode: str = "vector+scalar", name: str = "Result") -> None:
-    """Write UNV post data sections 56 (element) and 55 (node) per step following given header format."""
+def write_unv_post(
+    path: str | Path,
+    steps: List[dict],
+    data_per_line: int = 6,
+    mode: str | None = None,
+    name: str | None = None,
+) -> None:
+    """Write simplified UNV post data in two-line block format.
+
+    For each entry (nodes preferred), write:
+      Line 1: "<ID> <N>" where N = data_per_line (6 default; if 8, spill 2 to next line)
+      Line 2: six reals: x, y, z, |vec|, extra1, extra2 (unused are 0)
+      If N == 8: write remaining two reals on the next line (from rec["extra"], or 0s).
+    """
     path = Path(path)
     out: List[str] = []
 
-    def term():
-        out.append("    -1\n")
-
-    def fmt_e(v: float) -> str:
+    def fmt(v: float) -> str:
+        # Fixed-width 13.5e without trimming to match C's %13.5e
         return f"{v:13.5e}"
 
-    for st in steps:
+    # Choose nodes if present, else elements
+    entries: Dict[int, Dict[str, np.ndarray | float]] = {}
+    if steps:
+        st = steps[0]
+        nodes = st.get("nodes", {})
+        elems = st.get("elements", {})
+        entries = nodes if nodes else elems
+
+    # Write section 56 (elements) header, then entries; then section 55 (nodes) with same style
+    title_name = name or "Result"
+    for st in steps or [{}]:
+        # Section 56 (elements)
+        out.append("    -1\n")
+        out.append("    56\n")
+        out.append(f"{(st.get('name56') or title_name)}\n")
+        out.append("Element Data \n\n\n\n")
+        out.append(f"         1         4         3         8         2  {data_per_line:8d}\n")
         step = int(st.get("step", 1))
         sub = int(st.get("substep", 1))
-        time = float(st.get("time", 0.0))
-        # Section 56: element data
-        term()
-        out.append("    56\n")
-        out.append(f"{name}\nElement Data \n\n\n\n")
-        out.append(f"         1         4         3         8         2  {6:8d}\n")
         out.append(f"         2         1  {sub:8d}  {step:8d}\n")
+        time = float(st.get("time", 0.0))
         out.append(f"{time:13.5e}\n")
-        # Values
         elems = st.get("elements", {})
-        for eid in sorted(elems):
-            rec = elems[eid]
+        for idv in sorted(elems):
+            rec = elems[idv]
             vx, vy, vz = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float).tolist()
-            val = float(rec.get("value", 0.0))
-            if mode == "scalar":
-                out.append(f"{eid:8d} {fmt_e(val)}\n")
-            elif mode == "vector":
-                out.append(f"{eid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)}\n")
-            else:
-                out.append(f"{eid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)} {fmt_e(val)}\n")
-        term()
-        # Section 55: node data
-        term()
+            absval = float(rec.get("value", 0.0))
+            extra = rec.get("extra", [])
+            vals6: List[float] = [vx, vy, vz, absval]
+            e1 = float(extra[0]) if isinstance(extra, (list, tuple)) and len(extra) > 0 else 0.0
+            e2 = float(extra[1]) if isinstance(extra, (list, tuple)) and len(extra) > 1 else 0.0
+            vals6.extend([e1, e2])
+            out.append(f"{idv:10d}{data_per_line:10d}\n")
+            out.append("".join(fmt(v) for v in vals6) + "\n")
+            if data_per_line >= 8:
+                e3 = float(extra[2]) if isinstance(extra, (list, tuple)) and len(extra) > 2 else 0.0
+                e4 = float(extra[3]) if isinstance(extra, (list, tuple)) and len(extra) > 3 else 0.0
+                out.append("".join(fmt(v) for v in [e3, e4]) + "\n")
+        out.append("    -1\n")
+
+        # Section 55 (nodes)
+        out.append("    -1\n")
         out.append("    55\n")
-        out.append(f"{name}\nNode Data\n\n\n\n")
-        out.append(f"         1         4         3         8         2  {6:8d}\n")
+        out.append(f"{(st.get('name55') or title_name)}\n")
+        out.append("Node Data\n\n\n\n")
+        out.append(f"         1         4         3         8         2  {data_per_line:8d}\n")
         out.append(f"         2         1  {sub:8d}  {step:8d}\n")
         out.append(f"{time:13.5e}\n")
         nodes = st.get("nodes", {})
-        for nid in sorted(nodes):
-            rec = nodes[nid]
+        for idv in sorted(nodes):
+            rec = nodes[idv]
             vx, vy, vz = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float).tolist()
-            val = float(rec.get("value", 0.0))
-            if mode == "scalar":
-                out.append(f"{nid:8d} {fmt_e(val)}\n")
-            elif mode == "vector":
-                out.append(f"{nid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)}\n")
-            else:
-                out.append(f"{nid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)} {fmt_e(val)}\n")
-        term()
+            absval = float(rec.get("value", 0.0))
+            extra = rec.get("extra", [])
+            vals6: List[float] = [vx, vy, vz, absval]
+            e1 = float(extra[0]) if isinstance(extra, (list, tuple)) and len(extra) > 0 else 0.0
+            e2 = float(extra[1]) if isinstance(extra, (list, tuple)) and len(extra) > 1 else 0.0
+            vals6.extend([e1, e2])
+            out.append(f"{idv:10d}{data_per_line:10d}\n")
+            out.append("".join(fmt(v) for v in vals6) + "\n")
+            if data_per_line >= 8:
+                e3 = float(extra[2]) if isinstance(extra, (list, tuple)) and len(extra) > 2 else 0.0
+                e4 = float(extra[3]) if isinstance(extra, (list, tuple)) and len(extra) > 3 else 0.0
+                out.append("".join(fmt(v) for v in [e3, e4]) + "\n")
+        out.append("    -1\n")
 
     path.write_text("".join(out), encoding="utf-8")

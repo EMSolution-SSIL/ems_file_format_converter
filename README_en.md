@@ -11,7 +11,7 @@ A lightweight converter for CAE mesh and post data. Supports formats used by Sci
 ## Installation
 Requires Python 3.10+.
 
-Before publishing to PyPI, please install from the Wheel attached to a Release (or build locally):
+Please install from the Wheel attached to a Release (or build locally):
 
 ```powershell
 # Install from a downloaded Wheel

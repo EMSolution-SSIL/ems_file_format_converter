@@ -179,11 +179,12 @@ def write_atlas(path: str | Path, mesh: meshio.Mesh, property_id: int = 1) -> No
 
 
 def _write_nodes_section(lines: List[str], mesh: meshio.Mesh, point_ids: np.ndarray | None) -> None:
-    lines.append("GRID\n")
+    lines.append("GRID    (I8,3E14.6)\n")
     for i, (x, y, z) in enumerate(np.asarray(mesh.points, dtype=float)):
         nid = int(point_ids[i]) if point_ids is not None else i + 1
-        lines.append(f"{nid} {x:.16g} {y:.16g} {z:.16g}\n")
-    lines.append("-1\n")
+        # Fixed-width formatting: I8, 3E14.6
+        lines.append(f"{nid:8d} {x:14.6e} {y:14.6e} {z:14.6e}\n")
+    lines.append("      -1\n")
 
 
 def _write_elements_section(
@@ -194,7 +195,7 @@ def _write_elements_section(
     id_blocks: List[np.ndarray],
     property_id: int,
 ) -> None:
-    lines.append("CONC\n")
+    lines.append("CONC    (8I8)\n")
     elem_id_counter = 1
     for bidx, (cell_type, conn) in enumerate(cells):
         if cell_type not in MESHIO_TO_ATLAS:
@@ -222,9 +223,23 @@ def _write_elements_section(
                 node_ids = [int(n) + 1 for n in elem[:n_nodes]]
 
             eid = int(block_ids[eidx]) if block_ids is not None else elem_id_counter
-            lines.append(f"{eid} {ietp} {iprop} " + " ".join(map(str, node_ids)) + "\n")
+            # First line: element header with fixed-width integers (I8)
+            header = f"{eid:8d} {ietp:8d} {iprop:8d}"
+            # Connectivity: write 8 node IDs per line, each I8
+            if not node_ids:
+                lines.append(header + "\n")
+            else:
+                # write first line header + up to 5 ids
+                chunk = node_ids[:5]
+                lines.append(header + " " + " ".join(f"{nid:8d}" for nid in chunk) + "\n")
+                # remaining ids on subsequent lines (8 per line = eid+ietp+iprop + 5 ids)
+                rest = node_ids[5:]
+                for i in range(0, len(rest), 5):
+                    part = rest[i : i + 5]
+                    lines.append("" + " ".join(f"{nid:8d}" for nid in part) + "\n")
+
             elem_id_counter += 1
-    lines.append("-1\n")
+    lines.append("      -1\n")
 
 
 # --- ATLAS Post data (STEP/EVAL/STRE) ---
