@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from femap import neu
+from ems_file_format_converter import femap as neu
 
 
 def test_read_and_roundtrip_neu_mesh(tmp_path: Path):

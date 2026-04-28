@@ -5,9 +5,9 @@ from pathlib import Path
 import argparse
 import meshio
 
-from atlas import atlas
-from femap import neu
-from unv import unv
+from . import atlas
+from . import femap as neu
+from . import unv
 
 READERS = {
     ".neu": neu.read_neu,

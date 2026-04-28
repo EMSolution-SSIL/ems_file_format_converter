@@ -45,7 +45,7 @@ ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --pos
 ## Python API（例）
 
 ```python
-from atlas import atlas
+from ems_file_format_converter import atlas
 mesh = atlas.read_atlas("sample/mesh_sample.atl")
 atlas.write_atlas("out.atl", mesh)
 
@@ -53,7 +53,7 @@ steps = atlas.read_atlas_post("sample/post_sample.atl")
 atlas.write_atlas_post("out_post.atl", steps, mode="vector+scalar")
 ```
 
-UNVやFemap NEUも同様に `unv.unv` / `femap.neu` のモジュールを利用できます。
+UNVやFemap NEUも同様に `ems_file_format_converter.unv` / `ems_file_format_converter.femap` のモジュールを利用できます。
 
 ## テスト
 

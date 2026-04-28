@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ems-file-format-converter"
-version = "0.1.0"
+version = "0.2.0"
 description = "CAE file format converter (Femap neutral, I-DEAS UNV, ATLAS, ...)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,11 +12,8 @@ license = "MIT"
 dependencies = ["meshio>=5.0"]
 
 [project.scripts]
-ems-file-format-converter = "cli:main"
-
-[tool.setuptools]
-py-modules = ["cli"]
+ems-file-format-converter = "ems_file_format_converter.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["atlas", "unv", "femap"]
-exclude = ["tests", "sample", "__pycache__"]
+where = ["src"]
+include = ["ems_file_format_converter*"]

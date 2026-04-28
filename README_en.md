@@ -45,7 +45,7 @@ Supported extensions:
 ## Python API (examples)
 
 ```python
-from atlas import atlas
+from ems_file_format_converter import atlas
 mesh = atlas.read_atlas("sample/mesh_sample.atl")
 atlas.write_atlas("out.atl", mesh)
 
@@ -53,7 +53,7 @@ steps = atlas.read_atlas_post("sample/post_sample.atl")
 atlas.write_atlas_post("out_post.atl", steps, mode="vector+scalar")
 ```
 
-For UNV and Femap NEU use `unv.unv` and `femap.neu` modules respectively.
+For UNV and Femap NEU use `ems_file_format_converter.unv` and `ems_file_format_converter.femap` modules respectively.
 
 ## Tests
 
