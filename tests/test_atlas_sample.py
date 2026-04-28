@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from atlas import atlas
+from ems_file_format_converter import atlas
 
 
 def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):

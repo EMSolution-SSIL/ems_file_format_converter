@@ -5,9 +5,9 @@ from pathlib import Path
 import argparse
 import meshio
 
-from atlas import atlas
-from femap import neu
-from unv import unv
+from . import atlas
+from . import femap as neu
+from . import unv
 
 READERS = {
     ".neu": neu.read_neu,
@@ -70,5 +70,7 @@ def main():
         atlas.write_atlas(out_path, mesh)
     elif (outfmt == "unv") or (outfmt is None and out_path.suffix.lower() == ".unv"):
         unv.write_unv(out_path, mesh)
+    elif (outfmt == "neu") or (outfmt is None and out_path.suffix.lower() == ".neu"):
+        neu.write_neu(out_path, mesh)
     else:
         meshio.write(out_path, mesh, file_format=args.outformat)
