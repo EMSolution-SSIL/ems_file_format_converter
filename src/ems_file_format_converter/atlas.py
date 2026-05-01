@@ -60,9 +60,9 @@ def _read_elements(
             break
 
         parts = line.split()
-        ielem = int(parts[0])
-        ietp = int(parts[1])
-        iprop = int(parts[2])  # 物性番号（必要なら cell_data に入れる）
+        ielem = int(parts[0]) # element ID
+        ietp = int(parts[1]) # element type code
+        iprop = int(parts[2])  # property ID (必要なら cell_data に入れる)
 
         try:
             cell_type, n_nodes = ATLAS_TO_MESHIO[ietp]
@@ -120,7 +120,7 @@ def read_atlas(path: str | Path) -> meshio.Mesh:
     points = np.array([nodes[nid] for nid in sorted_node_ids], dtype=float)
 
     cells = []
-    cell_data: Dict[str, List[np.ndarray]] = {"id": [], "iprop": []}
+    cell_data: Dict[str, List[np.ndarray]] = {"element_id": [], "property_id": []}
     for cell_type, conn_list in cells_by_type.items():
         data = np.array(
             [[id2idx[n] for n in conn] for conn in conn_list],
@@ -128,8 +128,8 @@ def read_atlas(path: str | Path) -> meshio.Mesh:
         )
         cells.append((cell_type, data))
         # element IDs and iprops aligned per type
-        cell_data["id"].append(np.asarray(elem_ids_by_type[cell_type], dtype=int))
-        cell_data["iprop"].append(np.asarray(iprops_by_type[cell_type], dtype=int))
+        cell_data["element_id"].append(np.asarray(elem_ids_by_type[cell_type], dtype=int))
+        cell_data["property_id"].append(np.asarray(iprops_by_type[cell_type], dtype=int))
     # store original node IDs in point_data
     point_data = {"id": np.asarray(sorted_node_ids, dtype=int)}
 
@@ -165,10 +165,10 @@ def write_atlas(path: str | Path, mesh: meshio.Mesh, property_id: int = 1) -> No
     iprop_blocks: List[np.ndarray] = []
     id_blocks: List[np.ndarray] = []
     if isinstance(getattr(mesh, "cell_data", None), dict):
-        if "iprop" in mesh.cell_data:
-            iprop_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["iprop"]]
-        if "id" in mesh.cell_data:
-            id_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["id"]]
+        if "property_id" in mesh.cell_data:
+            iprop_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["property_id"]]
+        if "element_id" in mesh.cell_data:
+            id_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["element_id"]]
 
     lines: List[str] = []
 
