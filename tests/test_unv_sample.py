@@ -13,6 +13,13 @@ def test_read_and_roundtrip_unv_mesh(tmp_path: Path):
     mesh = unv.read_unv(sample_path)
     assert mesh.points.shape[1] == 3
     assert len(mesh.cells) > 0
+    assert "id" in mesh.point_data
+    assert "element_id" in mesh.cell_data
+    assert "property_id" in mesh.cell_data
+    assert "material_id" in mesh.cell_data
+    assert "id" not in mesh.cell_data
+    assert "prop1" not in mesh.cell_data
+    assert "prop2" not in mesh.cell_data
 
     # Round-trip write and re-read
     out = tmp_path / "mesh_roundtrip.unv"
@@ -20,6 +27,22 @@ def test_read_and_roundtrip_unv_mesh(tmp_path: Path):
     mesh2 = unv.read_unv(out)
 
     np.testing.assert_allclose(mesh2.points, mesh.points)
+    np.testing.assert_array_equal(mesh2.point_data["id"], mesh.point_data["id"])
+    assert "element_id" in mesh2.cell_data
+    assert "property_id" in mesh2.cell_data
+    assert "material_id" in mesh2.cell_data
+    np.testing.assert_array_equal(
+        np.concatenate([a for a in mesh2.cell_data["element_id"]]),
+        np.concatenate([a for a in mesh.cell_data["element_id"]]),
+    )
+    np.testing.assert_array_equal(
+        np.concatenate([a for a in mesh2.cell_data["property_id"]]),
+        np.concatenate([a for a in mesh.cell_data["property_id"]]),
+    )
+    np.testing.assert_array_equal(
+        np.concatenate([a for a in mesh2.cell_data["material_id"]]),
+        np.concatenate([a for a in mesh.cell_data["material_id"]]),
+    )
     # Compare cell types and sizes
     types2 = [getattr(c, "type", None) or getattr(c, "type") for c in mesh2.cells]
     types1 = [getattr(c, "type", None) or getattr(c, "type") for c in mesh.cells]

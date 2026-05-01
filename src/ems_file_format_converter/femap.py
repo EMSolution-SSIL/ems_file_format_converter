@@ -163,9 +163,9 @@ def read_neu(path: str | Path) -> meshio.Mesh:
                                 i += 1
                                 continue
                             # descriptor fields: [eid,124,matid,femap_type,topology]
-                            eid = desc_ints[0]
-                            matid = desc_ints[2]
-                            topology = desc_ints[4]
+                            eid = desc_ints[0] # element id 
+                            matid = desc_ints[2] # property id
+                            topology = desc_ints[4] # element type code
                             # read two connectivity lines (up to 20 ints)
                             if i + 2 > n:
                                 break
@@ -280,8 +280,8 @@ def read_neu(path: str | Path) -> meshio.Mesh:
         cells.append((ctype, data))
         # Align cell_data lengths with filtered connectivity
         keep_idx = [i for i, conn in enumerate(conns_all) if expected is None or len(conn) == expected]
-        cell_data.setdefault("matid", []).append(np.array([mats[i] for i in keep_idx], dtype=int))
-        cell_data.setdefault("eid", []).append(np.array([eids[i] for i in keep_idx], dtype=int))
+        cell_data.setdefault("property_id", []).append(np.array([mats[i] for i in keep_idx], dtype=int))
+        cell_data.setdefault("element_id", []).append(np.array([eids[i] for i in keep_idx], dtype=int))
 
     return meshio.Mesh(
         points=points, cells=cells, point_data={"id": np.array(sorted_node_ids, int)}, cell_data=cell_data
@@ -399,10 +399,10 @@ def write_neu(path: str | Path, mesh: meshio.Mesh, version: str = "4.41") -> Non
     eid_blocks: List[np.ndarray] = []
     matid_blocks: List[np.ndarray] = []
     if isinstance(getattr(mesh, "cell_data", None), dict):
-        if "eid" in mesh.cell_data:
-            eid_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data.get("eid", [])]
-        if "matid" in mesh.cell_data:
-            matid_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data.get("matid", [])]
+        if "element_id" in mesh.cell_data:
+            eid_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data.get("element_id", [])]
+        if "property_id" in mesh.cell_data:
+            matid_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data.get("property_id", [])]
 
     eid_counter = 1
     for bidx, block in enumerate(cells):

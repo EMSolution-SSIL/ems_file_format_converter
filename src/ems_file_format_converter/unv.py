@@ -84,11 +84,11 @@ def read_unv(path: str | Path) -> meshio.Mesh:
             parts = s.split()
             # Header: eid, etype, prop1, prop2, 15, ncount
             try:
-                eid = int(parts[0])
-                etype_code = int(parts[1])
-                prop1 = int(parts[2])
-                prop2 = int(parts[3])
-                ncount = int(parts[5])
+                eid = int(parts[0]) # element id
+                etype_code = int(parts[1]) # element type code
+                prop1 = int(parts[2]) # physical property
+                prop2 = int(parts[3]) # material property
+                ncount = int(parts[5]) # number of nodes on the element
             except Exception:
                 # Not a valid header; skip line
                 continue
@@ -152,7 +152,7 @@ def read_unv(path: str | Path) -> meshio.Mesh:
     points = np.array([nodes[nid] for nid in sorted_node_ids], dtype=float)
 
     cells = []
-    cell_data: Dict[str, List[np.ndarray]] = {"id": [], "prop1": [], "prop2": []}
+    cell_data: Dict[str, List[np.ndarray]] = {"element_id": [], "property_id": [], "material_id": []}
     for ctype, conn_list in cells_by_type.items():
         # Map connectivity node IDs to zero-based indices; skip elements referencing missing nodes
         mapped_conns: List[List[int]] = []
@@ -177,9 +177,9 @@ def read_unv(path: str | Path) -> meshio.Mesh:
             continue
         data = np.asarray(mapped_conns, dtype=int)
         cells.append((ctype, data))
-        cell_data["id"].append(np.asarray(ids_kept, dtype=int))
-        cell_data["prop1"].append(np.asarray(props1_kept, dtype=int))
-        cell_data["prop2"].append(np.asarray(props2_kept, dtype=int))
+        cell_data["element_id"].append(np.asarray(ids_kept, dtype=int))
+        cell_data["property_id"].append(np.asarray(props1_kept, dtype=int))
+        cell_data["material_id"].append(np.asarray(props2_kept, dtype=int))
 
     return meshio.Mesh(
         points=points, cells=cells, point_data={"id": np.array(sorted_node_ids, int)}, cell_data=cell_data
@@ -206,12 +206,12 @@ def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
     id_blocks: List[np.ndarray] = []
     prop1_blocks: List[np.ndarray] = []
     prop2_blocks: List[np.ndarray] = []
-    if isinstance(getattr(mesh, "cell_data", None), dict) and "id" in mesh.cell_data:
-        id_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["id"]]
-    if isinstance(getattr(mesh, "cell_data", None), dict) and "prop1" in mesh.cell_data:
-        prop1_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["prop1"]]
-    if isinstance(getattr(mesh, "cell_data", None), dict) and "prop2" in mesh.cell_data:
-        prop2_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["prop2"]]
+    if isinstance(getattr(mesh, "cell_data", None), dict) and "element_id" in mesh.cell_data:
+        id_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["element_id"]]
+    if isinstance(getattr(mesh, "cell_data", None), dict) and "property_id" in mesh.cell_data:
+        prop1_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["property_id"]]
+    if isinstance(getattr(mesh, "cell_data", None), dict) and "material_id" in mesh.cell_data:
+        prop2_blocks = [np.asarray(a, dtype=int) for a in mesh.cell_data["material_id"]]
     if isinstance(getattr(mesh, "point_data", None), dict) and "id" in mesh.point_data:
         pid = np.asarray(mesh.point_data["id"]).reshape(-1)
         if pid.size == len(mesh.points):

@@ -15,8 +15,10 @@ def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):
     assert len(mesh.cells) > 0
 
     assert "id" in mesh.point_data
-    assert "id" in mesh.cell_data
-    assert "iprop" in mesh.cell_data
+    assert "element_id" in mesh.cell_data
+    assert "property_id" in mesh.cell_data
+    assert "id" not in mesh.cell_data
+    assert "iprop" not in mesh.cell_data
 
     orig_point_ids = np.asarray(mesh.point_data["id"]).copy()
 
@@ -26,8 +28,8 @@ def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):
     for i, block in enumerate(mesh.cells):
         data = block.data if hasattr(block, "data") else block[1]
         total_elems += len(data)
-        orig_elem_ids.extend(np.asarray(mesh.cell_data["id"][i]).tolist())
-        orig_iprops.extend(np.asarray(mesh.cell_data["iprop"][i]).tolist())
+        orig_elem_ids.extend(np.asarray(mesh.cell_data["element_id"][i]).tolist())
+        orig_iprops.extend(np.asarray(mesh.cell_data["property_id"][i]).tolist())
 
     out_path = tmp_path / "roundtrip.atlas"
     atlas.write_atlas(out_path, mesh)
@@ -42,8 +44,8 @@ def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):
     elem_ids2 = []
     iprops2 = []
     for i, _ in enumerate(mesh2.cells):
-        elem_ids2.extend(np.asarray(mesh2.cell_data["id"][i]).tolist())
-        iprops2.extend(np.asarray(mesh2.cell_data["iprop"][i]).tolist())
+        elem_ids2.extend(np.asarray(mesh2.cell_data["element_id"][i]).tolist())
+        iprops2.extend(np.asarray(mesh2.cell_data["property_id"][i]).tolist())
 
     assert elem_ids2 == orig_elem_ids
     assert iprops2 == orig_iprops

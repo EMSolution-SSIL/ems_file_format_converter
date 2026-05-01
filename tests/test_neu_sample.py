@@ -12,10 +12,25 @@ def test_read_and_roundtrip_neu_mesh(tmp_path: Path):
         mesh = neu.read_neu(sample_path)
         assert mesh.points.shape[1] == 3
         assert len(mesh.cells) > 0
+        assert "id" in mesh.point_data
+        assert "element_id" in mesh.cell_data
+        assert "property_id" in mesh.cell_data
+        assert "eid" not in mesh.cell_data
+        assert "matid" not in mesh.cell_data
         out = tmp_path / f"rt_{fname}"
         neu.write_neu(out, mesh)
         mesh2 = neu.read_neu(out)
         np.testing.assert_allclose(mesh2.points, mesh.points)
+        assert "element_id" in mesh2.cell_data
+        assert "property_id" in mesh2.cell_data
+        np.testing.assert_array_equal(
+            np.concatenate([a for a in mesh2.cell_data["element_id"]]),
+            np.concatenate([a for a in mesh.cell_data["element_id"]]),
+        )
+        np.testing.assert_array_equal(
+            np.concatenate([a for a in mesh2.cell_data["property_id"]]),
+            np.concatenate([a for a in mesh.cell_data["property_id"]]),
+        )
 
         # Compare counts per cell type
         def counts(m):
