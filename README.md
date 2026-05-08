@@ -31,11 +31,17 @@ ems-file-format-converter --in mesh_sample.atl --out out.unv
 ems-file-format-converter --in sample_mesh.unv --out out.atl
 ```
 
-ポストデータの読み書き（モード指定: `scalar|vector|vector+scalar`）:
+ポストデータの読み書き（モード指定: `components|scalar|vector|vector+scalar`）:
 
 ```powershell
-ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --post-mode vector+scalar
+ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --post-mode components
 ```
+
+`--post-mode` の意味:
+- `components`（デフォルト）: すべての成分（component1..N）をそのまま出力（部分的に切り捨てない）
+- `scalar`: component1 のみ出力
+- `vector`: component1..3 を出力（不足分は 0）
+- `vector+scalar`: component1..4 を出力（不足分は 0）
 
 対応拡張子:
 - ATLAS: `.atl`
@@ -50,7 +56,7 @@ mesh = atlas.read_atlas("sample/mesh_sample.atl")
 atlas.write_atlas("out.atl", mesh)
 
 steps = atlas.read_atlas_post("sample/post_sample.atl")
-atlas.write_atlas_post("out_post.atl", steps, mode="vector+scalar")
+atlas.write_atlas_post("out_post.atl", steps, mode="components")
 ```
 
 UNVやFemap NEUも同様に `ems_file_format_converter.unv` / `ems_file_format_converter.femap` のモジュールを利用できます。

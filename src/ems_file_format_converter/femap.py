@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Dict, List, Tuple
 
 import numpy as np
 import meshio
+
+from .post_components import get_component, max_component_index_in_record, record_from_components
 
 # Minimal Femap Neutral (.neu) reader/writer supporting v4.1 and v10.3 samples.
 # We parse nodes and elements from common sections and map to meshio types similar to ATLAS.
@@ -469,7 +472,7 @@ def read_neu_post(path: str | Path) -> List[dict]:
     """Read Femap Neutral post data (450 + 451) into ATLAS-like records.
 
     Accumulates per-component datasets inside each 451 section using temporary
-    maps, then assigns per-id records as {'vector': [x,y,z], 'value': mag}.
+    maps, then assigns per-id records as {'component1': ..., 'component2': ..., ...}.
     """
     path = Path(path)
     with path.open(encoding="utf-8", errors="ignore") as f:
@@ -478,6 +481,8 @@ def read_neu_post(path: str | Path) -> List[dict]:
     steps: List[dict] = []
     i = 0
     n = len(lines)
+
+    comp_re = re.compile(r"-(\d+)\s*$")
 
     def _new_step(step_num: int, time_val: float) -> dict:
         return {"step": step_num, "substep": 1, "time": time_val, "elements": {}, "nodes": {}}
@@ -518,11 +523,11 @@ def read_neu_post(path: str | Path) -> List[dict]:
                 steps.append(_new_step(1, 0.0))
             current = steps[-1]
             current_is_element: bool | None = None
-            current_comp: int | None = None  # 0:X,1:Y,2:Z,3:|V|
+            current_comp: int | None = None  # 1-based component index from dataset title suffix
 
-            # Per-component accumulators for this section
-            elems_comp: Dict[int, Dict[int, float]] = {0: {}, 1: {}, 2: {}, 3: {}}
-            nodes_comp: Dict[int, Dict[int, float]] = {0: {}, 1: {}, 2: {}, 3: {}}
+            # Per-component accumulators for this section (component index -> {id -> value})
+            elems_comp: Dict[int, Dict[int, float]] = {}
+            nodes_comp: Dict[int, Dict[int, float]] = {}
             acc: Dict[int, int, float] = {}  # dataset no, id, value
 
             # Read datasets until -1
@@ -539,12 +544,10 @@ def read_neu_post(path: str | Path) -> List[dict]:
 
                 i += 1
                 val_name = lines[i].strip()
-                # Infer component from title suffix -1..-4
-                title = val_name.lower()
-                for k in (4, 3, 2, 1):
-                    if title.endswith(f"-{k}"):
-                        current_comp = 3 if k == 4 else (k - 1)
-                        break
+                # Infer component index from title suffix "-<n>" (1-based).
+                # If missing, fall back to sequential numbering to avoid dropping data.
+                m = comp_re.search(val_name)
+                current_comp = int(m.group(1)) if m else (data_no + 1)
                 i += 6  # skip 0,0,0,0,0,0,0,0,0,0,0, line and two float triplet lines
 
                 t = lines[i].strip()
@@ -598,43 +601,34 @@ def read_neu_post(path: str | Path) -> List[dict]:
                     data_no += 1
                     i += 1
 
-                # Assign accumulated values to elements/nodes as arrays per rid
-                # Build per-id arrays from acc: {data_no: {rid: val}}
-                vals_by_rid: Dict[int, List[float]] = {}
-                for no_map in acc.values():
-                    for rid, val in no_map.items():
-                        vals_by_rid.setdefault(rid, []).append(float(val))
+                # Assign accumulated values for this dataset into the component map.
+                # acc is {dataset_no -> {id -> val}}; we clear it after each dataset.
+                no_map = {}
+                for mapp in acc.values():
+                    no_map.update({int(rid): float(v) for rid, v in mapp.items()})
+                acc = {}
 
-                # Decide target based on current_is_element
+                if current_comp is None:
+                    continue
                 if current_is_element is True:
-                    for rid, arr in vals_by_rid.items():
-                        elems_comp[current_comp][rid] = np.asarray(arr, float)
-                    acc = {}
+                    comp_map = elems_comp.setdefault(int(current_comp), {})
                 else:
-                    for rid, arr in vals_by_rid.items():
-                        nodes_comp[current_comp][rid] = np.asarray(arr, float)
-                    acc = {}
+                    comp_map = nodes_comp.setdefault(int(current_comp), {})
+                for rid, v in no_map.items():
+                    comp_map[int(rid)] = float(v)
 
-            # Build per-id records
-            def _last_scalar(v: float | np.ndarray) -> float:
-                arr = np.asarray(v, float).reshape(-1)
-                return float(arr[-1]) if arr.size > 0 else 0.0
-
-            ids_e = set().union(*[set(d.keys()) for d in elems_comp.values()])
+            # Build per-id records (component1..componentN)
+            ids_e = set().union(*[set(d.keys()) for d in elems_comp.values()]) if elems_comp else set()
+            max_c_e = max(elems_comp.keys()) if elems_comp else 0
             for eid in sorted(ids_e):
-                vec = [_last_scalar(elems_comp[c].get(eid, 0.0)) for c in (0, 1, 2)]
-                mag = _last_scalar(elems_comp[3].get(eid, 0.0))
-                if mag == 0.0 and any(abs(x) > 0.0 for x in vec):
-                    mag = float(np.linalg.norm(np.asarray(vec, float)))
-                current["elements"][eid] = {"vector": vec, "value": mag}
+                vals = [elems_comp.get(c, {}).get(eid, 0.0) for c in range(1, max_c_e + 1)]
+                current["elements"][eid] = record_from_components(vals)
 
-            ids_n = set().union(*[set(d.keys()) for d in nodes_comp.values()])
+            ids_n = set().union(*[set(d.keys()) for d in nodes_comp.values()]) if nodes_comp else set()
+            max_c_n = max(nodes_comp.keys()) if nodes_comp else 0
             for nid in sorted(ids_n):
-                vec = [_last_scalar(nodes_comp[c].get(nid, 0.0)) for c in (0, 1, 2)]
-                mag = _last_scalar(nodes_comp[3].get(nid, 0.0))
-                if mag == 0.0 and any(abs(x) > 0.0 for x in vec):
-                    mag = float(np.linalg.norm(np.asarray(vec, float)))
-                current["nodes"][nid] = {"vector": vec, "value": mag}
+                vals = [nodes_comp.get(c, {}).get(nid, 0.0) for c in range(1, max_c_n + 1)]
+                current["nodes"][nid] = record_from_components(vals)
 
             if i < n and lines[i].strip() == "-1":
                 i += 1
@@ -716,21 +710,39 @@ def write_neu_post(
             out.append("   -1\n")
             out.append("   451\n")
 
-        elems: Dict[int, Dict[str, np.ndarray | float]] = st.get("elements", {}) or {}
-        nodes: Dict[int, Dict[str, np.ndarray | float]] = st.get("nodes", {}) or {}
+        elems: Dict[int, dict] = st.get("elements", {}) or {}
+        nodes: Dict[int, dict] = st.get("nodes", {}) or {}
 
-        # Elements: DSIDs 60031..60034, titles BMAG-elem-1..4
-        if elems:
+        mode_norm = (mode or "components").lower()
+        if mode_norm not in ("scalar", "vector", "vector+scalar", "components", "all"):
+            raise ValueError(f"Unsupported mode: {mode_norm}")
+        if mode_norm == "all":
+            mode_norm = "components"
+
+        def _target_ncomp(bucket: Dict[int, dict]) -> int:
+            if mode_norm == "scalar":
+                return 1
+            if mode_norm == "vector":
+                return 3
+            if mode_norm == "vector+scalar":
+                return 4
+            mx = 0
+            for rec in bucket.values():
+                if isinstance(rec, dict) and ("vector" in rec or "value" in rec):
+                    raise TypeError("Femap post records must use componentN keys; legacy vector/value records are not supported")
+                if isinstance(rec, dict):
+                    mx = max(mx, max_component_index_in_record(rec))
+            return mx
+
+        ncomp_e = _target_ncomp(elems) if elems else 0
+        ncomp_n = _target_ncomp(nodes) if nodes else 0
+
+        # Elements: DSIDs 60031.., titles <prefix>-elem-<comp>
+        if elems and ncomp_e > 0:
             # Preserve original element ID order as provided in steps
             ids_sorted_e = list(elems.keys())
-            first_e = elems[ids_sorted_e[0]]
-            vec_e = np.asarray(first_e.get("vector", [0.0, 0.0, 0.0]), float).reshape(-1)
-            has_vec_e = bool(np.any(vec_e))
-            elem_titles = [f"{title_prefix}-elem-{i}" for i in range(1, 5)]
-            elem_dsids = [60031, 60032, 60033, 60034]
-            # Always emit four datasets (X,Y,Z,|V|) to match sample 451 layout
-            datasets_e = [(elem_dsids[c], elem_titles[c], c) for c in range(4)]
-            for dsid, title, comp in datasets_e:
+            datasets_e = [(60030 + c, f"{title_prefix}-elem-{c}", c) for c in range(1, ncomp_e + 1)]
+            for dsid, title, comp_idx in datasets_e:
                 if style == "1051":
                     # Header
                     out.append(f"{step}, {dsid},1,\n")
@@ -745,14 +757,7 @@ def write_neu_post(
                         values: List[float] = []
                         for eid in run_ids:
                             rec = elems[eid]
-                            if has_vec_e and comp in (0, 1, 2):
-                                v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                                val = float(v[comp]) if comp < len(v) else 0.0
-                            elif has_vec_e and comp == 3:
-                                v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                                val = float(np.linalg.norm(v))
-                            else:
-                                val = float(rec.get("value", 0.0))
+                            val = get_component(rec, comp_idx, 0.0)
                             values.append(val)
                         out.extend(_emit_1051_values(s_id, e_id, values))
                     out.append("-1,0.,\n")
@@ -767,29 +772,16 @@ def write_neu_post(
                     out.append("0,1,1,\n")
                     for eid in ids_sorted_e:
                         rec = elems[eid]
-                        if has_vec_e and comp in (0, 1, 2):
-                            v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                            val = float(v[comp]) if comp < len(v) else 0.0
-                        elif has_vec_e and comp == 3:
-                            v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                            val = float(np.linalg.norm(v))
-                        else:
-                            val = float(rec.get("value", 0.0))
+                        val = get_component(rec, comp_idx, 0.0)
                         out.append(f"{eid}, {f13(val)},\n")
                     out.append("-1,0.,\n")
 
-        # Nodes: DSIDs 31..34, titles BMAG-node-1..4
-        if nodes:
+        # Nodes: DSIDs 31.., titles <prefix>-node-<comp>
+        if nodes and ncomp_n > 0:
             # Preserve original node ID order as provided in steps
             ids_sorted_n = list(nodes.keys())
-            first_n = nodes[ids_sorted_n[0]]
-            vec_n = np.asarray(first_n.get("vector", [0.0, 0.0, 0.0]), float).reshape(-1)
-            has_vec_n = bool(np.any(vec_n))
-            node_titles = [f"{title_prefix}-node-{i}" for i in range(1, 5)]
-            node_dsids = [31, 32, 33, 34]
-            # Always emit four datasets (X,Y,Z,|V|) to match sample 451 layout
-            datasets_n = [(node_dsids[c], node_titles[c], c) for c in range(4)]
-            for dsid, title, comp in datasets_n:
+            datasets_n = [(30 + c, f"{title_prefix}-node-{c}", c) for c in range(1, ncomp_n + 1)]
+            for dsid, title, comp_idx in datasets_n:
                 if style == "1051":
                     # Header
                     out.append(f"{step}, {dsid},1,\n")
@@ -804,14 +796,7 @@ def write_neu_post(
                         values: List[float] = []
                         for nid in run_ids:
                             rec = nodes[nid]
-                            if has_vec_n and comp in (0, 1, 2):
-                                v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                                val = float(v[comp]) if comp < len(v) else 0.0
-                            elif has_vec_n and comp == 3:
-                                v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                                val = float(np.linalg.norm(v))
-                            else:
-                                val = float(rec.get("value", 0.0))
+                            val = get_component(rec, comp_idx, 0.0)
                             values.append(val)
                         out.extend(_emit_1051_values(s_id, e_id, values))
                     out.append("-1,0.,\n")
@@ -826,14 +811,7 @@ def write_neu_post(
                     out.append("0,1,1,\n")
                     for nid in ids_sorted_n:
                         rec = nodes[nid]
-                        if has_vec_n and comp in (0, 1, 2):
-                            v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                            val = float(v[comp]) if comp < len(v) else 0.0
-                        elif has_vec_n and comp == 3:
-                            v = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float)
-                            val = float(np.linalg.norm(v))
-                        else:
-                            val = float(rec.get("value", 0.0))
+                        val = get_component(rec, comp_idx, 0.0)
                         out.append(f"{nid}, {f13(val)},\n")
                     out.append("-1,0.,\n")
 

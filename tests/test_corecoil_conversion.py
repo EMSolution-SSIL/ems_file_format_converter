@@ -67,7 +67,7 @@ def test_convert_corecoil_atlas_to_neu(tmp_path: Path):
     steps = atlas.read_atlas_post(post_in)
 
     femap.write_neu(mesh_out, mesh)
-    femap.write_neu_post(post_out, steps, mode="vector+scalar")
+    femap.write_neu_post(post_out, steps, mode="components")
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
     assert post_out.exists() and post_out.stat().st_size > 0
@@ -209,7 +209,7 @@ def test_convert_corecoil_chained_atl_to_neu_to_unv_to_atl(tmp_path: Path):
 def test_convert_corecoil_post_atl_to_neu(tmp_path: Path):
     steps = atlas.read_atlas_post(DATA_DIR / "current_org.atl")
     out = tmp_path / "current.neu"
-    femap.write_neu_post(out, steps, mode="vector+scalar")
+    femap.write_neu_post(out, steps, mode="components")
     assert out.exists() and out.stat().st_size > 0
     steps2 = femap.read_neu_post(out)
     assert len(steps2) == len(steps)
@@ -221,7 +221,7 @@ def test_convert_corecoil_post_atl_to_neu(tmp_path: Path):
 def test_convert_corecoil_post_atl_to_unv(tmp_path: Path):
     steps = atlas.read_atlas_post(DATA_DIR / "current_org.atl")
     out = tmp_path / "current.unv"
-    unv.write_unv_post(out, steps)
+    unv.write_unv_post(out, steps, mode="components")
     assert out.exists() and out.stat().st_size > 0
     steps2 = unv.read_unv_post(out)
     assert len(steps2) == len(steps)

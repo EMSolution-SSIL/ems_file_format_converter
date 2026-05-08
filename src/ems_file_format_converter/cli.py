@@ -27,9 +27,9 @@ def main():
     parser.add_argument("--post-out", help="post data output file")
     parser.add_argument(
         "--post-mode",
-        choices=["scalar", "vector", "vector+scalar"],
-        default="vector+scalar",
-        help="Post data write mode: values per ID",
+        choices=["scalar", "vector", "vector+scalar", "components"],
+        default="components",
+        help="Post data write mode (default: components)",
     )
     args = parser.parse_args()
 

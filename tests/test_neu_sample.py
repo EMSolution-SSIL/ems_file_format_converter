@@ -49,7 +49,7 @@ def test_read_and_roundtrip_neu_post(tmp_path: Path):
         steps = neu.read_neu_post(sample_path)
         assert len(steps) >= 1
         out = tmp_path / f"rt_{fname}"
-        neu.write_neu_post(out, steps, mode="vector+scalar")
+        neu.write_neu_post(out, steps, mode="components")
         # Confirm file was written
         assert out.exists(), f"Output not created: {out}"
         assert out.stat().st_size > 0, "Output file is empty"

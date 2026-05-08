@@ -67,7 +67,7 @@ def test_read_and_roundtrip_unv_post(tmp_path: Path):
     assert len(steps) >= 1
 
     out = tmp_path / "post_roundtrip.unv"
-    unv.write_unv_post(out, steps, mode="vector+scalar", name="TestData")
+    unv.write_unv_post(out, steps, mode="components", name="TestData")
     steps2 = unv.read_unv_post(out)
 
     assert len(steps2) == len(steps)
