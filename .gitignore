@@ -22,3 +22,6 @@ dist/
 # OSごとのゴミ
 .DS_Store
 Thumbs.db
+
+# その他
+.github/

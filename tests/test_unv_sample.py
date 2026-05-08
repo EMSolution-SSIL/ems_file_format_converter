@@ -10,7 +10,7 @@ def test_read_and_roundtrip_unv_mesh(tmp_path: Path):
     sample_path = Path(__file__).resolve().parents[1] / "sample" / "mesh_sample.unv"
     assert sample_path.exists(), f"Missing sample file: {sample_path}"
 
-    mesh = unv.read_unv(sample_path)
+    mesh = unv.read_mesh(sample_path)
     assert mesh.points.shape[1] == 3
     assert len(mesh.cells) > 0
     assert "id" in mesh.point_data
@@ -23,8 +23,8 @@ def test_read_and_roundtrip_unv_mesh(tmp_path: Path):
 
     # Round-trip write and re-read
     out = tmp_path / "mesh_roundtrip.unv"
-    unv.write_unv(out, mesh)
-    mesh2 = unv.read_unv(out)
+    unv.write_mesh(out, mesh)
+    mesh2 = unv.read_mesh(out)
 
     np.testing.assert_allclose(mesh2.points, mesh.points)
     np.testing.assert_array_equal(mesh2.point_data["id"], mesh.point_data["id"])
@@ -63,12 +63,12 @@ def test_read_and_roundtrip_unv_post(tmp_path: Path):
     sample_path = Path(__file__).resolve().parents[1] / "sample" / "post_sample.unv"
     assert sample_path.exists(), f"Missing sample file: {sample_path}"
 
-    steps = unv.read_unv_post(sample_path)
+    steps = unv.read_post(sample_path)
     assert len(steps) >= 1
 
     out = tmp_path / "post_roundtrip.unv"
-    unv.write_unv_post(out, steps, mode="vector+scalar", name="TestData")
-    steps2 = unv.read_unv_post(out)
+    unv.write_post(out, steps, mode="components", name="TestData")
+    steps2 = unv.read_post(out)
 
     assert len(steps2) == len(steps)
     for a, b in zip(steps, steps2):

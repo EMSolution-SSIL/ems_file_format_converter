@@ -31,11 +31,17 @@ ems-file-format-converter --in mesh_sample.atl --out out.unv
 ems-file-format-converter --in sample_mesh.unv --out out.atl
 ```
 
-Post data I/O (mode: `scalar|vector|vector+scalar`):
+Post data I/O (mode: `components|scalar|vector|vector+scalar`):
 
 ```powershell
-ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --post-mode vector+scalar
+ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --post-mode components
 ```
+
+`--post-mode` meanings:
+- `components` (default): write all components (component1..N) without truncation
+- `scalar`: write component1 only
+- `vector`: write component1..3 (pads missing with 0)
+- `vector+scalar`: write component1..4 (pads missing with 0)
 
 Supported extensions:
 - ATLAS: `.atl`
@@ -46,11 +52,11 @@ Supported extensions:
 
 ```python
 from ems_file_format_converter import atlas
-mesh = atlas.read_atlas("sample/mesh_sample.atl")
-atlas.write_atlas("out.atl", mesh)
+mesh = atlas.read_mesh("sample/mesh_sample.atl")
+atlas.write_mesh("out.atl", mesh)
 
-steps = atlas.read_atlas_post("sample/post_sample.atl")
-atlas.write_atlas_post("out_post.atl", steps, mode="vector+scalar")
+steps = atlas.read_post("sample/post_sample.atl")
+atlas.write_post("out_post.atl", steps, mode="components")
 ```
 
 For UNV and Femap NEU use `ems_file_format_converter.unv` and `ems_file_format_converter.femap` modules respectively.

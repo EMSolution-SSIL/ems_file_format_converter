@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+from .post_components import components_from_record, record_from_components
 import meshio
 
 ATLAS_TO_MESHIO = {
@@ -85,7 +87,7 @@ def _read_elements(
     return cells_by_type, elem_ids_by_type, iprops_by_type
 
 
-def read_atlas(path: str | Path) -> meshio.Mesh:
+def read_mesh(path: str | Path) -> meshio.Mesh:
     path = Path(path)
     with path.open() as f:
         lines = f.readlines()
@@ -141,7 +143,7 @@ def read_atlas(path: str | Path) -> meshio.Mesh:
 MESHIO_TO_ATLAS: Dict[str, Tuple[int, int]] = {v[0]: (k, v[1]) for k, v in ATLAS_TO_MESHIO.items()}
 
 
-def write_atlas(path: str | Path, mesh: meshio.Mesh, property_id: int = 1) -> None:
+def write_mesh(path: str | Path, mesh: meshio.Mesh, property_id: int = 1) -> None:
     path = Path(path)
 
     # Normalize cells to list of (type, data)
@@ -243,7 +245,7 @@ def _write_elements_section(
 
 
 # --- ATLAS Post data (STEP/EVAL/STRE) ---
-def read_atlas_post(path: str | Path) -> List[dict]:
+def read_post(path: str | Path) -> List[dict]:
     path = Path(path)
     with path.open() as f:
         lines = f.readlines()
@@ -282,13 +284,7 @@ def read_atlas_post(path: str | Path) -> List[dict]:
                 parts = row.split()
                 eid = int(parts[0])
                 vals = [float(x) for x in parts[1:]]
-                if len(vals) >= 4:
-                    vec = vals[:3]
-                    val = vals[-1]
-                else:
-                    vec = (vals + [0.0, 0.0, 0.0])[:3]
-                    val = vals[-1] if vals else 0.0
-                step_rec["elements"][eid] = {"vector": np.array(vec, float), "value": float(val)}
+                step_rec["elements"][eid] = record_from_components(vals)
 
             hdr = next(it).strip()
             if not hdr.startswith("STRE"):
@@ -297,25 +293,25 @@ def read_atlas_post(path: str | Path) -> List[dict]:
                 parts = row.split()
                 nid = int(parts[0])
                 vals = [float(x) for x in parts[1:]]
-                if len(vals) >= 4:
-                    vec = vals[:3]
-                    val = vals[-1]
-                else:
-                    vec = (vals + [0.0, 0.0, 0.0])[:3]
-                    val = vals[-1] if vals else 0.0
-                step_rec["nodes"][nid] = {"vector": np.array(vec, float), "value": float(val)}
+                step_rec["nodes"][nid] = record_from_components(vals)
 
             steps.append(step_rec)
 
     return steps
 
 
-def write_atlas_post(path: str | Path, steps: List[dict], mode: str = "vector+scalar") -> None:
+def write_post(path: str | Path, steps: List[dict], mode: str = "components") -> None:
     path = Path(path)
     out: List[str] = []
 
     def fmt_e(v: float) -> str:
         return f"{v:14.5e}"
+
+    mode = (mode or "components").lower()
+    if mode not in ("scalar", "vector", "vector+scalar", "components", "all"):
+        raise ValueError(f"Unsupported mode: {mode}")
+    if mode == "all":
+        mode = "components"
 
     for idx, st in enumerate(steps, start=1):
         step_no = int(st.get("step", idx))
@@ -329,29 +325,49 @@ def write_atlas_post(path: str | Path, steps: List[dict], mode: str = "vector+sc
         elements = st.get("elements", {})
         for eid in sorted(elements):
             rec = elements[eid]
-            vx, vy, vz = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float).tolist()
-            val = float(rec.get("value", 0.0))
+            if isinstance(rec, dict) and ("vector" in rec or "value" in rec):
+                raise TypeError("ATLAS post records must use componentN keys; legacy vector/value records are not supported")
+            comps = components_from_record(rec) if isinstance(rec, dict) else []
             if mode == "scalar":
-                out.append(f"{eid:8d} {fmt_e(val)}\n")
+                vals = [comps[0] if len(comps) > 0 else 0.0]
             elif mode == "vector":
-                out.append(f"{eid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)}\n")
-            else:  # vector+scalar
-                out.append(f"{eid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)} {fmt_e(val)}\n")
+                vals = (comps + [0.0, 0.0, 0.0])[:3]
+            elif mode == "vector+scalar":
+                vals = (comps + [0.0, 0.0, 0.0, 0.0])[:4]
+            else:
+                vals = comps
+            if vals:
+                out.append(f"{eid:8d} " + " ".join(fmt_e(v) for v in vals) + "\n")
+            else:
+                out.append(f"{eid:8d}\n")
         out.append("      -1\n")
 
         out.append(f"STRE   {idx}(I8,6E14.0)\n")
         nodes = st.get("nodes", {})
         for nid in sorted(nodes):
             rec = nodes[nid]
-            vx, vy, vz = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float).tolist()
-            val = float(rec.get("value", 0.0))
+            if isinstance(rec, dict) and ("vector" in rec or "value" in rec):
+                raise TypeError("ATLAS post records must use componentN keys; legacy vector/value records are not supported")
+            comps = components_from_record(rec) if isinstance(rec, dict) else []
             if mode == "scalar":
-                out.append(f"{nid:8d} {fmt_e(val)}\n")
+                vals = [comps[0] if len(comps) > 0 else 0.0]
             elif mode == "vector":
-                out.append(f"{nid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)}\n")
-
+                vals = (comps + [0.0, 0.0, 0.0])[:3]
+            elif mode == "vector+scalar":
+                vals = (comps + [0.0, 0.0, 0.0, 0.0])[:4]
             else:
-                out.append(f"{nid:8d} {fmt_e(vx)} {fmt_e(vy)} {fmt_e(vz)} {fmt_e(val)}\n")
+                vals = comps
+            if vals:
+                out.append(f"{nid:8d} " + " ".join(fmt_e(v) for v in vals) + "\n")
+            else:
+                out.append(f"{nid:8d}\n")
         out.append("      -1\n")
 
     path.write_text("".join(out), encoding="utf-8")
+
+
+# Backward-compatible aliases
+read_atlas = read_mesh
+write_atlas = write_mesh
+read_atlas_post = read_post
+write_atlas_post = write_post

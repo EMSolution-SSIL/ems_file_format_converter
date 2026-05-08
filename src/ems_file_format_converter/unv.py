@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 
 import numpy as np
 import meshio
+
+from .post_components import components_from_record, max_components_in_step, record_from_components
 
 # UNV element type codes (internal convention) mapped to meshio types
 # Based on provided correspondence table
@@ -28,7 +30,7 @@ UNV_TO_MESHIO: Dict[int, Tuple[str, int]] = {
 MESHIO_TO_UNV: Dict[str, Tuple[int, int]] = {v[0]: (k, v[1]) for k, v in UNV_TO_MESHIO.items()}
 
 
-def read_unv(path: str | Path) -> meshio.Mesh:
+def read_mesh(path: str | Path) -> meshio.Mesh:
     """Read a minimal I-DEAS UNV mesh with sections 2411 (nodes) and 2412 (elements).
     This supports the provided samples and common linear elements.
     """
@@ -186,7 +188,7 @@ def read_unv(path: str | Path) -> meshio.Mesh:
     )
 
 
-def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
+def write_mesh(path: str | Path, mesh: meshio.Mesh) -> None:
     """Write a minimal UNV mesh using sections 2411 and 2412."""
     path = Path(path)
 
@@ -270,13 +272,12 @@ def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
     path.write_text("".join(out), encoding="utf-8")
 
 
-def read_unv_post(path: str | Path) -> List[dict]:
+def read_post(path: str | Path) -> List[dict]:
     """Read UNV post data with headers for sections 56 (elements) and 55 (nodes).
 
     Each data entry uses the two-line block format:
       - Line 1: "<ID> <N>" (ID is node/element id; N is data-per-line, typically 6 or 8)
-      - Line 2: six reals: x, y, z, |vec|, extra1, extra2
-      - If N > 6: read a third line with two more reals
+      - Next lines: N reals, possibly split across multiple lines
     """
     path = Path(path)
     with path.open() as f:
@@ -285,8 +286,8 @@ def read_unv_post(path: str | Path) -> List[dict]:
     it = iter(lines)
     steps: List[dict] = []
 
-    def _read_entries() -> Dict[int, Dict[str, np.ndarray | float]]:
-        entries: Dict[int, Dict[str, np.ndarray | float]] = {}
+    def _read_entries() -> Dict[int, Dict[str, float]]:
+        entries: Dict[int, Dict[str, float]] = {}
         # Read until terminator "-1" or next section header
         for raw in it:
             s = raw.strip()
@@ -304,23 +305,20 @@ def read_unv_post(path: str | Path) -> List[dict]:
             except ValueError:
                 # not a data header line
                 continue
-            # values line (six reals)
-            vals_line = next(it, "").strip()
             vals: List[float] = []
-            if vals_line:
-                vals.extend(float(x) for x in vals_line.split())
-            # optional extra line for N>6
-            if nvals > 6:
-                extra_line = next(it, "").strip()
-                if extra_line:
-                    vals.extend(float(x) for x in extra_line.split())
-            # normalize
-            vals = vals + [0.0] * max(0, 4 - len(vals))
-            vx = float(vals[0]) if len(vals) > 0 else 0.0
-            vy = float(vals[1]) if len(vals) > 1 else 0.0
-            vz = float(vals[2]) if len(vals) > 2 else 0.0
-            absval = float(vals[3]) if len(vals) > 3 else 0.0
-            entries[idv] = {"vector": np.array([vx, vy, vz], float), "value": absval}
+            # Read as many lines as needed to collect nvals floats.
+            while len(vals) < nvals:
+                line = next(it, "").strip()
+                if not line:
+                    continue
+                if line == "-1":
+                    break
+                for x in line.split():
+                    try:
+                        vals.append(float(x))
+                    except Exception:
+                        pass
+            entries[idv] = record_from_components(vals[:nvals])
         return entries
 
     while True:
@@ -396,7 +394,7 @@ def read_unv_post(path: str | Path) -> List[dict]:
     return steps
 
 
-def write_unv_post(
+def write_post(
     path: str | Path,
     steps: List[dict],
     data_per_line: int = 6,
@@ -406,9 +404,8 @@ def write_unv_post(
     """Write simplified UNV post data in two-line block format.
 
     For each entry (nodes preferred), write:
-      Line 1: "<ID> <N>" where N = data_per_line (6 default; if 8, spill 2 to next line)
-      Line 2: six reals: x, y, z, |vec|, extra1, extra2 (unused are 0)
-      If N == 8: write remaining two reals on the next line (from rec["extra"], or 0s).
+      Line 1: "<ID> <N>" where N is the number of components written for that record
+      Next lines: N reals, written in fixed-width exponential form
     """
     path = Path(path)
     out: List[str] = []
@@ -417,8 +414,14 @@ def write_unv_post(
         # Fixed-width 13.5e without trimming to match C's %13.5e
         return f"{v:13.5e}"
 
+    mode_norm = (mode or "components").lower()
+    if mode_norm not in ("scalar", "vector", "vector+scalar", "components", "all"):
+        raise ValueError(f"Unsupported mode: {mode_norm}")
+    if mode_norm == "all":
+        mode_norm = "components"
+
     # Choose nodes if present, else elements
-    entries: Dict[int, Dict[str, np.ndarray | float]] = {}
+    entries: Dict[int, Dict[str, float]] = {}
     if steps:
         st = steps[0]
         nodes = st.get("nodes", {})
@@ -428,12 +431,25 @@ def write_unv_post(
     # Write section 56 (elements) header, then entries; then section 55 (nodes) with same style
     title_name = name or "Result"
     for st in steps or [{}]:
+        step_max = max_components_in_step(st) if mode_norm == "components" else 0
+        if mode_norm == "scalar":
+            header_n = 1
+        elif mode_norm == "vector":
+            header_n = 3
+        elif mode_norm == "vector+scalar":
+            header_n = 4
+        else:
+            header_n = max(step_max, 1)
+        # Maintain older behavior where the header carries a nominal "data per line" value.
+        # For components mode, prefer the actual max component count.
+        header_n = int(max(header_n, int(data_per_line or 0))) if mode_norm != "components" else int(max(header_n, 1))
+
         # Section 56 (elements)
         out.append("    -1\n")
         out.append("    56\n")
         out.append(f"{(st.get('name56') or title_name)}\n")
         out.append("Element Data \n\n\n\n")
-        out.append(f"         1         4         3         8         2  {data_per_line:8d}\n")
+        out.append(f"         1         4         3         8         2  {header_n:8d}\n")
         step = int(st.get("step", 1))
         sub = int(st.get("substep", 1))
         out.append(f"         2         1  {sub:8d}  {step:8d}\n")
@@ -442,19 +458,27 @@ def write_unv_post(
         elems = st.get("elements", {})
         for idv in sorted(elems):
             rec = elems[idv]
-            vx, vy, vz = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float).tolist()
-            absval = float(rec.get("value", 0.0))
-            extra = rec.get("extra", [])
-            vals6: List[float] = [vx, vy, vz, absval]
-            e1 = float(extra[0]) if isinstance(extra, (list, tuple)) and len(extra) > 0 else 0.0
-            e2 = float(extra[1]) if isinstance(extra, (list, tuple)) and len(extra) > 1 else 0.0
-            vals6.extend([e1, e2])
-            out.append(f"{idv:10d}{data_per_line:10d}\n")
-            out.append("".join(fmt(v) for v in vals6) + "\n")
-            if data_per_line >= 8:
-                e3 = float(extra[2]) if isinstance(extra, (list, tuple)) and len(extra) > 2 else 0.0
-                e4 = float(extra[3]) if isinstance(extra, (list, tuple)) and len(extra) > 3 else 0.0
-                out.append("".join(fmt(v) for v in [e3, e4]) + "\n")
+            if isinstance(rec, dict) and ("vector" in rec or "value" in rec):
+                raise TypeError("UNV post records must use componentN keys; legacy vector/value records are not supported")
+            comps = components_from_record(rec) if isinstance(rec, Mapping) else []
+            if mode_norm == "scalar":
+                vals: List[float] = [comps[0] if comps else 0.0]
+            elif mode_norm == "vector":
+                vals = (comps + [0.0, 0.0, 0.0])[:3]
+            elif mode_norm == "vector+scalar":
+                vals = (comps + [0.0, 0.0, 0.0, 0.0])[:4]
+            else:
+                vals = comps if comps else [0.0]
+            if mode_norm == "components":
+                nvals = len(vals)
+            else:
+                nvals = int(data_per_line or len(vals) or 1)
+                if len(vals) < nvals:
+                    vals = vals + [0.0] * (nvals - len(vals))
+            out.append(f"{idv:10d}{nvals:10d}\n")
+            for j in range(0, nvals, 6):
+                chunk = vals[j : j + 6]
+                out.append("".join(fmt(v) for v in chunk) + "\n")
         out.append("    -1\n")
 
         # Section 55 (nodes)
@@ -462,25 +486,40 @@ def write_unv_post(
         out.append("    55\n")
         out.append(f"{(st.get('name55') or title_name)}\n")
         out.append("Node Data\n\n\n\n")
-        out.append(f"         1         4         3         8         2  {data_per_line:8d}\n")
+        out.append(f"         1         4         3         8         2  {header_n:8d}\n")
         out.append(f"         2         1  {sub:8d}  {step:8d}\n")
         out.append(f"{time:13.5e}\n")
         nodes = st.get("nodes", {})
         for idv in sorted(nodes):
             rec = nodes[idv]
-            vx, vy, vz = np.asarray(rec.get("vector", [0.0, 0.0, 0.0]), float).tolist()
-            absval = float(rec.get("value", 0.0))
-            extra = rec.get("extra", [])
-            vals6: List[float] = [vx, vy, vz, absval]
-            e1 = float(extra[0]) if isinstance(extra, (list, tuple)) and len(extra) > 0 else 0.0
-            e2 = float(extra[1]) if isinstance(extra, (list, tuple)) and len(extra) > 1 else 0.0
-            vals6.extend([e1, e2])
-            out.append(f"{idv:10d}{data_per_line:10d}\n")
-            out.append("".join(fmt(v) for v in vals6) + "\n")
-            if data_per_line >= 8:
-                e3 = float(extra[2]) if isinstance(extra, (list, tuple)) and len(extra) > 2 else 0.0
-                e4 = float(extra[3]) if isinstance(extra, (list, tuple)) and len(extra) > 3 else 0.0
-                out.append("".join(fmt(v) for v in [e3, e4]) + "\n")
+            if isinstance(rec, dict) and ("vector" in rec or "value" in rec):
+                raise TypeError("UNV post records must use componentN keys; legacy vector/value records are not supported")
+            comps = components_from_record(rec) if isinstance(rec, Mapping) else []
+            if mode_norm == "scalar":
+                vals = [comps[0] if comps else 0.0]
+            elif mode_norm == "vector":
+                vals = (comps + [0.0, 0.0, 0.0])[:3]
+            elif mode_norm == "vector+scalar":
+                vals = (comps + [0.0, 0.0, 0.0, 0.0])[:4]
+            else:
+                vals = comps if comps else [0.0]
+            if mode_norm == "components":
+                nvals = len(vals)
+            else:
+                nvals = int(data_per_line or len(vals) or 1)
+                if len(vals) < nvals:
+                    vals = vals + [0.0] * (nvals - len(vals))
+            out.append(f"{idv:10d}{nvals:10d}\n")
+            for j in range(0, nvals, 6):
+                chunk = vals[j : j + 6]
+                out.append("".join(fmt(v) for v in chunk) + "\n")
         out.append("    -1\n")
 
     path.write_text("".join(out), encoding="utf-8")
+
+
+# Backward-compatible aliases
+read_unv = read_mesh
+write_unv = write_mesh
+read_unv_post = read_post
+write_unv_post = write_post

@@ -63,19 +63,19 @@ def test_convert_corecoil_atlas_to_neu(tmp_path: Path):
     mesh_out = tmp_path / "mesh_out.neu"
     post_out = tmp_path / "post_out.neu"
 
-    mesh = atlas.read_atlas(mesh_in)
-    steps = atlas.read_atlas_post(post_in)
+    mesh = atlas.read_mesh(mesh_in)
+    steps = atlas.read_post(post_in)
 
-    femap.write_neu(mesh_out, mesh)
-    femap.write_neu_post(post_out, steps, mode="vector+scalar")
+    femap.write_mesh(mesh_out, mesh)
+    femap.write_post(post_out, steps, mode="components")
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
     assert post_out.exists() and post_out.stat().st_size > 0
 
-    mesh2 = femap.read_neu(mesh_out)
+    mesh2 = femap.read_mesh(mesh_out)
     _assert_mesh_equivalent(mesh, mesh2)
 
-    steps2 = femap.read_neu_post(post_out)
+    steps2 = femap.read_post(post_out)
     assert len(steps2) == len(steps)
     s0, s1 = steps[0], steps2[0]
     assert set(s0["elements"].keys()) == set(s1["elements"].keys())
@@ -92,19 +92,19 @@ def test_convert_corecoil_atlas_to_unv(tmp_path: Path):
     mesh_out = tmp_path / "mesh_out.unv"
     post_out = tmp_path / "post_out.unv"
 
-    mesh = atlas.read_atlas(mesh_in)
-    steps = atlas.read_atlas_post(post_in)
+    mesh = atlas.read_mesh(mesh_in)
+    steps = atlas.read_post(post_in)
 
-    unv.write_unv(mesh_out, mesh)
-    unv.write_unv_post(post_out, steps)
+    unv.write_mesh(mesh_out, mesh)
+    unv.write_post(post_out, steps)
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
     assert post_out.exists() and post_out.stat().st_size > 0
 
-    mesh2 = unv.read_unv(mesh_out)
+    mesh2 = unv.read_mesh(mesh_out)
     _assert_mesh_equivalent(mesh, mesh2)
 
-    steps2 = unv.read_unv_post(post_out)
+    steps2 = unv.read_post(post_out)
     assert len(steps2) == len(steps)
     s0, s1 = steps[0], steps2[0]
     assert set(s0["elements"].keys()) == set(s1["elements"].keys())
@@ -119,12 +119,12 @@ def test_convert_corecoil_neu_to_atlas(tmp_path: Path):
     mesh_in = DATA_DIR / "post_geom_org.neu"
     mesh_out = tmp_path / "mesh_out.atl"
 
-    mesh = femap.read_neu(mesh_in)
-    atlas.write_atlas(mesh_out, mesh)
+    mesh = femap.read_mesh(mesh_in)
+    atlas.write_mesh(mesh_out, mesh)
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
 
-    mesh2 = atlas.read_atlas(mesh_out)
+    mesh2 = atlas.read_mesh(mesh_out)
     _assert_mesh_equivalent(mesh, mesh2)
 
 
@@ -136,12 +136,12 @@ def test_convert_corecoil_neu_to_unv(tmp_path: Path):
     mesh_in = DATA_DIR / "post_geom_org.neu"
     mesh_out = tmp_path / "mesh_out.unv"
 
-    mesh = femap.read_neu(mesh_in)
-    unv.write_unv(mesh_out, mesh)
+    mesh = femap.read_mesh(mesh_in)
+    unv.write_mesh(mesh_out, mesh)
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
 
-    mesh2 = unv.read_unv(mesh_out)
+    mesh2 = unv.read_mesh(mesh_out)
     _assert_mesh_equivalent(mesh, mesh2)
 
 
@@ -153,12 +153,12 @@ def test_convert_corecoil_unv_to_atlas(tmp_path: Path):
     mesh_in = DATA_DIR / "post_geom_org.unv"
     mesh_out = tmp_path / "mesh_out.atl"
 
-    mesh = unv.read_unv(mesh_in)
-    atlas.write_atlas(mesh_out, mesh)
+    mesh = unv.read_mesh(mesh_in)
+    atlas.write_mesh(mesh_out, mesh)
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
 
-    mesh2 = atlas.read_atlas(mesh_out)
+    mesh2 = atlas.read_mesh(mesh_out)
     _assert_mesh_equivalent(mesh, mesh2)
 
 
@@ -170,12 +170,12 @@ def test_convert_corecoil_unv_to_neu(tmp_path: Path):
     mesh_in = DATA_DIR / "post_geom_org.unv"
     mesh_out = tmp_path / "mesh_out.neu"
 
-    mesh = unv.read_unv(mesh_in)
-    femap.write_neu(mesh_out, mesh)
+    mesh = unv.read_mesh(mesh_in)
+    femap.write_mesh(mesh_out, mesh)
 
     assert mesh_out.exists() and mesh_out.stat().st_size > 0
 
-    mesh2 = femap.read_neu(mesh_out)
+    mesh2 = femap.read_mesh(mesh_out)
     _assert_mesh_equivalent(mesh, mesh2)
 
 
@@ -185,19 +185,19 @@ def test_convert_corecoil_unv_to_neu(tmp_path: Path):
 
 def test_convert_corecoil_chained_atl_to_neu_to_unv_to_atl(tmp_path: Path):
     """Verify that metadata survives a three-step chain."""
-    mesh0 = atlas.read_atlas(DATA_DIR / "post_geom_org.atl")
+    mesh0 = atlas.read_mesh(DATA_DIR / "post_geom_org.atl")
 
     p1 = tmp_path / "step1.neu"
-    femap.write_neu(p1, mesh0)
-    mesh1 = femap.read_neu(p1)
+    femap.write_mesh(p1, mesh0)
+    mesh1 = femap.read_mesh(p1)
 
     p2 = tmp_path / "step2.unv"
-    unv.write_unv(p2, mesh1)
-    mesh2 = unv.read_unv(p2)
+    unv.write_mesh(p2, mesh1)
+    mesh2 = unv.read_mesh(p2)
 
     p3 = tmp_path / "step3.atl"
-    atlas.write_atlas(p3, mesh2)
-    mesh3 = atlas.read_atlas(p3)
+    atlas.write_mesh(p3, mesh2)
+    mesh3 = atlas.read_mesh(p3)
 
     _assert_mesh_equivalent(mesh0, mesh3)
 
@@ -207,11 +207,11 @@ def test_convert_corecoil_chained_atl_to_neu_to_unv_to_atl(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_convert_corecoil_post_atl_to_neu(tmp_path: Path):
-    steps = atlas.read_atlas_post(DATA_DIR / "current_org.atl")
+    steps = atlas.read_post(DATA_DIR / "current_org.atl")
     out = tmp_path / "current.neu"
-    femap.write_neu_post(out, steps, mode="vector+scalar")
+    femap.write_post(out, steps, mode="components")
     assert out.exists() and out.stat().st_size > 0
-    steps2 = femap.read_neu_post(out)
+    steps2 = femap.read_post(out)
     assert len(steps2) == len(steps)
     s0, s1 = steps[0], steps2[0]
     assert set(s0["elements"].keys()) == set(s1["elements"].keys())
@@ -219,11 +219,11 @@ def test_convert_corecoil_post_atl_to_neu(tmp_path: Path):
 
 
 def test_convert_corecoil_post_atl_to_unv(tmp_path: Path):
-    steps = atlas.read_atlas_post(DATA_DIR / "current_org.atl")
+    steps = atlas.read_post(DATA_DIR / "current_org.atl")
     out = tmp_path / "current.unv"
-    unv.write_unv_post(out, steps)
+    unv.write_post(out, steps, mode="components")
     assert out.exists() and out.stat().st_size > 0
-    steps2 = unv.read_unv_post(out)
+    steps2 = unv.read_post(out)
     assert len(steps2) == len(steps)
     s0, s1 = steps[0], steps2[0]
     assert set(s0["elements"].keys()) == set(s1["elements"].keys())

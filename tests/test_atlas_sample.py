@@ -3,13 +3,14 @@ from pathlib import Path
 import numpy as np
 
 from ems_file_format_converter import atlas
+from ems_file_format_converter.post_components import components_from_record
 
 
 def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):
     sample_path = Path(__file__).resolve().parents[1] / "sample" / "mesh_sample.atl"
     assert sample_path.exists(), f"Missing sample file: {sample_path}"
 
-    mesh = atlas.read_atlas(sample_path)
+    mesh = atlas.read_mesh(sample_path)
 
     assert mesh.points.ndim == 2 and mesh.points.shape[1] == 3
     assert len(mesh.cells) > 0
@@ -32,8 +33,8 @@ def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):
         orig_iprops.extend(np.asarray(mesh.cell_data["property_id"][i]).tolist())
 
     out_path = tmp_path / "roundtrip.atlas"
-    atlas.write_atlas(out_path, mesh)
-    mesh2 = atlas.read_atlas(out_path)
+    atlas.write_mesh(out_path, mesh)
+    mesh2 = atlas.read_mesh(out_path)
 
     np.testing.assert_equal(mesh2.point_data["id"], orig_point_ids)
     assert mesh2.points.shape == mesh.points.shape
@@ -55,7 +56,7 @@ def test_read_and_roundtrip_atlas_post(tmp_path: Path):
     sample = Path(__file__).resolve().parents[1] / "sample" / "post_sample.atl"
     assert sample.exists(), f"Missing sample file: {sample}"
 
-    steps = atlas.read_atlas_post(sample)
+    steps = atlas.read_post(sample)
     assert len(steps) >= 2
 
     s0 = steps[0]
@@ -65,12 +66,13 @@ def test_read_and_roundtrip_atlas_post(tmp_path: Path):
 
     eid0, ed0 = next(iter(s0["elements"].items()))
     assert isinstance(eid0, int)
-    assert np.asarray(ed0["vector"]).shape == (3,)
-    assert isinstance(ed0["value"], float)
+    comps0 = components_from_record(ed0)
+    assert len(comps0) >= 1
+    assert all(isinstance(v, float) for v in comps0)
 
     out = tmp_path / "post_roundtrip.dat"
-    atlas.write_atlas_post(out, steps)
-    steps2 = atlas.read_atlas_post(out)
+    atlas.write_post(out, steps, mode="components")
+    steps2 = atlas.read_post(out)
 
     assert len(steps2) == len(steps)
 
@@ -84,13 +86,15 @@ def test_read_and_roundtrip_atlas_post(tmp_path: Path):
         for ids in list(a["elements"].keys())[:3]:
             va = a["elements"][ids]
             vb = b["elements"][ids]
-            np.testing.assert_allclose(va["vector"], vb["vector"], rtol=0, atol=1e-12)
-            np.testing.assert_allclose(va["value"], vb["value"], rtol=0, atol=1e-12)
+            np.testing.assert_allclose(
+                components_from_record(va), components_from_record(vb), rtol=0, atol=1e-12
+            )
         for ids in list(a["nodes"].keys())[:3]:
             va = a["nodes"][ids]
             vb = b["nodes"][ids]
-            np.testing.assert_allclose(va["vector"], vb["vector"], rtol=0, atol=1e-12)
-            np.testing.assert_allclose(va["value"], vb["value"], rtol=0, atol=1e-12)
+            np.testing.assert_allclose(
+                components_from_record(va), components_from_record(vb), rtol=0, atol=1e-12
+            )
 
 
 if __name__ == "__main__":
