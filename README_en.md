@@ -52,11 +52,11 @@ Supported extensions:
 
 ```python
 from ems_file_format_converter import atlas
-mesh = atlas.read_atlas("sample/mesh_sample.atl")
-atlas.write_atlas("out.atl", mesh)
+mesh = atlas.read_mesh("sample/mesh_sample.atl")
+atlas.write_mesh("out.atl", mesh)
 
-steps = atlas.read_atlas_post("sample/post_sample.atl")
-atlas.write_atlas_post("out_post.atl", steps, mode="components")
+steps = atlas.read_post("sample/post_sample.atl")
+atlas.write_post("out_post.atl", steps, mode="components")
 ```
 
 For UNV and Femap NEU use `ems_file_format_converter.unv` and `ems_file_format_converter.femap` modules respectively.

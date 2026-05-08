@@ -30,7 +30,7 @@ UNV_TO_MESHIO: Dict[int, Tuple[str, int]] = {
 MESHIO_TO_UNV: Dict[str, Tuple[int, int]] = {v[0]: (k, v[1]) for k, v in UNV_TO_MESHIO.items()}
 
 
-def read_unv(path: str | Path) -> meshio.Mesh:
+def read_mesh(path: str | Path) -> meshio.Mesh:
     """Read a minimal I-DEAS UNV mesh with sections 2411 (nodes) and 2412 (elements).
     This supports the provided samples and common linear elements.
     """
@@ -188,7 +188,7 @@ def read_unv(path: str | Path) -> meshio.Mesh:
     )
 
 
-def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
+def write_mesh(path: str | Path, mesh: meshio.Mesh) -> None:
     """Write a minimal UNV mesh using sections 2411 and 2412."""
     path = Path(path)
 
@@ -272,7 +272,7 @@ def write_unv(path: str | Path, mesh: meshio.Mesh) -> None:
     path.write_text("".join(out), encoding="utf-8")
 
 
-def read_unv_post(path: str | Path) -> List[dict]:
+def read_post(path: str | Path) -> List[dict]:
     """Read UNV post data with headers for sections 56 (elements) and 55 (nodes).
 
     Each data entry uses the two-line block format:
@@ -394,7 +394,7 @@ def read_unv_post(path: str | Path) -> List[dict]:
     return steps
 
 
-def write_unv_post(
+def write_post(
     path: str | Path,
     steps: List[dict],
     data_per_line: int = 6,
@@ -516,3 +516,10 @@ def write_unv_post(
         out.append("    -1\n")
 
     path.write_text("".join(out), encoding="utf-8")
+
+
+# Backward-compatible aliases
+read_unv = read_mesh
+write_unv = write_mesh
+read_unv_post = read_post
+write_unv_post = write_post

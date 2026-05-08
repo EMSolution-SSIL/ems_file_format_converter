@@ -10,9 +10,9 @@ from . import femap as neu
 from . import unv
 
 READERS = {
-    ".neu": neu.read_neu,
-    ".unv": unv.read_unv,
-    ".atl": atlas.read_atlas,  # ATLAS 独自拡張子（社内仕様）
+    ".neu": neu.read_mesh,
+    ".unv": unv.read_mesh,
+    ".atl": atlas.read_mesh,  # ATLAS 独自拡張子（社内仕様）
 }
 
 
@@ -42,8 +42,8 @@ def main():
             raise SystemExit("--post-in is required when using post options")
         if not args.post_out:
             raise SystemExit("--post-out is required when using post options")
-        steps = atlas.read_atlas_post(Path(args.post_in))
-        atlas.write_atlas_post(Path(args.post_out), steps, mode=args.post_mode)
+        steps = atlas.read_post(Path(args.post_in))
+        atlas.write_post(Path(args.post_out), steps, mode=args.post_mode)
         return
 
     # 入力フォーマット判定 (mesh)
@@ -54,12 +54,12 @@ def main():
 
     if informat in ("neu", "unv", "atl"):
         if informat == "neu":
-            mesh = neu.read_neu(in_path)
+            mesh = neu.read_mesh(in_path)
         elif informat == "unv":
-            mesh = unv.read_unv(in_path)
+            mesh = unv.read_mesh(in_path)
         else:
             # "atlas" または "atl"
-            mesh = atlas.read_atlas(in_path)
+            mesh = atlas.read_mesh(in_path)
     else:
         # meshio がそのまま読める形式は meshio に任せる
         mesh = meshio.read(in_path)
@@ -67,10 +67,10 @@ def main():
     # Decide writer
     outfmt = (args.outformat or "").lower() if args.outformat else None
     if (outfmt in ("atlas", "atl")) or (outfmt is None and out_path.suffix.lower() == ".atl"):
-        atlas.write_atlas(out_path, mesh)
+        atlas.write_mesh(out_path, mesh)
     elif (outfmt == "unv") or (outfmt is None and out_path.suffix.lower() == ".unv"):
-        unv.write_unv(out_path, mesh)
+        unv.write_mesh(out_path, mesh)
     elif (outfmt == "neu") or (outfmt is None and out_path.suffix.lower() == ".neu"):
-        neu.write_neu(out_path, mesh)
+        neu.write_mesh(out_path, mesh)
     else:
         meshio.write(out_path, mesh, file_format=args.outformat)

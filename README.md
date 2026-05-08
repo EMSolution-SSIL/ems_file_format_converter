@@ -52,11 +52,11 @@ ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --pos
 
 ```python
 from ems_file_format_converter import atlas
-mesh = atlas.read_atlas("sample/mesh_sample.atl")
-atlas.write_atlas("out.atl", mesh)
+mesh = atlas.read_mesh("sample/mesh_sample.atl")
+atlas.write_mesh("out.atl", mesh)
 
-steps = atlas.read_atlas_post("sample/post_sample.atl")
-atlas.write_atlas_post("out_post.atl", steps, mode="components")
+steps = atlas.read_post("sample/post_sample.atl")
+atlas.write_post("out_post.atl", steps, mode="components")
 ```
 
 UNVやFemap NEUも同様に `ems_file_format_converter.unv` / `ems_file_format_converter.femap` のモジュールを利用できます。

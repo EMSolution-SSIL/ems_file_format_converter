@@ -35,7 +35,7 @@ FEMAP_TO_MESHIO: Dict[str, Tuple[str, int]] = {
 MESHIO_TO_FEMAP: Dict[str, Tuple[str, int]] = {v[0]: (k, v[1]) for k, v in FEMAP_TO_MESHIO.items()}
 
 
-def read_neu(path: str | Path) -> meshio.Mesh:
+def read_mesh(path: str | Path) -> meshio.Mesh:
     """Read Femap Neutral (.neu) mesh supporting v4.1/v10.3 samples.
 
     Handles classic neutral sections:
@@ -314,7 +314,7 @@ def file_header(out: List[str]) -> List[str]:
     return out
 
 
-def write_neu(path: str | Path, mesh: meshio.Mesh, version: str = "4.41") -> None:
+def write_mesh(path: str | Path, mesh: meshio.Mesh, version: str = "4.41") -> None:
     """Write Femap Neutral (.neu) in classic sections 403/404 per FEMAP_io.c."""
     path = Path(path)
 
@@ -468,7 +468,7 @@ def write_neu(path: str | Path, mesh: meshio.Mesh, version: str = "4.41") -> Non
     path.write_text("".join(out), encoding="utf-8")
 
 
-def read_neu_post(path: str | Path) -> List[dict]:
+def read_post(path: str | Path) -> List[dict]:
     """Read Femap Neutral post data (450 + 451) into ATLAS-like records.
 
     Accumulates per-component datasets inside each 451 section using temporary
@@ -643,7 +643,7 @@ def read_neu_post(path: str | Path) -> List[dict]:
     return steps
 
 
-def write_neu_post(
+def write_post(
     path: str | Path, steps: List[dict], mode: str | None = None, style: str = "451", title_prefix: str = "BMAG"
 ) -> None:
     """Write Femap Neutral post data using 450 + 451 (default) or 1051 sections.
@@ -830,3 +830,10 @@ def write_neu_post(
     # Final guard: ensure file exists for downstream reads
     if not path.exists():
         path.touch()
+
+
+# Backward-compatible aliases
+read_neu = read_mesh
+write_neu = write_mesh
+read_neu_post = read_post
+write_neu_post = write_post

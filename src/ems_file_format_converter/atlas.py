@@ -87,7 +87,7 @@ def _read_elements(
     return cells_by_type, elem_ids_by_type, iprops_by_type
 
 
-def read_atlas(path: str | Path) -> meshio.Mesh:
+def read_mesh(path: str | Path) -> meshio.Mesh:
     path = Path(path)
     with path.open() as f:
         lines = f.readlines()
@@ -143,7 +143,7 @@ def read_atlas(path: str | Path) -> meshio.Mesh:
 MESHIO_TO_ATLAS: Dict[str, Tuple[int, int]] = {v[0]: (k, v[1]) for k, v in ATLAS_TO_MESHIO.items()}
 
 
-def write_atlas(path: str | Path, mesh: meshio.Mesh, property_id: int = 1) -> None:
+def write_mesh(path: str | Path, mesh: meshio.Mesh, property_id: int = 1) -> None:
     path = Path(path)
 
     # Normalize cells to list of (type, data)
@@ -245,7 +245,7 @@ def _write_elements_section(
 
 
 # --- ATLAS Post data (STEP/EVAL/STRE) ---
-def read_atlas_post(path: str | Path) -> List[dict]:
+def read_post(path: str | Path) -> List[dict]:
     path = Path(path)
     with path.open() as f:
         lines = f.readlines()
@@ -300,7 +300,7 @@ def read_atlas_post(path: str | Path) -> List[dict]:
     return steps
 
 
-def write_atlas_post(path: str | Path, steps: List[dict], mode: str = "components") -> None:
+def write_post(path: str | Path, steps: List[dict], mode: str = "components") -> None:
     path = Path(path)
     out: List[str] = []
 
@@ -364,3 +364,10 @@ def write_atlas_post(path: str | Path, steps: List[dict], mode: str = "component
         out.append("      -1\n")
 
     path.write_text("".join(out), encoding="utf-8")
+
+
+# Backward-compatible aliases
+read_atlas = read_mesh
+write_atlas = write_mesh
+read_atlas_post = read_post
+write_atlas_post = write_post
