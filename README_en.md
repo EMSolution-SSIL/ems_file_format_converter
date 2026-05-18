@@ -6,6 +6,7 @@ A lightweight converter for CAE mesh and post data. Supports formats used by Sci
 - **Supported formats**: ATLAS (mesh & post), UNV (mesh & post), Femap NEU (mesh & post)
 - **Metadata preservation**: Node ID, Element ID, and `iprop` when available
 - **CLI**: Single entry point for conversions and post I/O
+- **Universal package**: Pure Python package with no OS-specific native extension
 - **Tests/CI**: `pytest` included; GitHub Actions can run manual CI on `ubuntu-latest` and `windows-latest`
 - **PyPI publishing**: Manual publish to PyPI is supported from GitHub Actions
 
@@ -81,16 +82,18 @@ The `CI and Publish` GitHub Actions workflow is manual-only. It does not run on 
 - Open the `Actions` tab in GitHub and run `CI and Publish`.
 - For normal CI validation, leave `publish_to_pypi` set to `false`.
 - The workflow then tests and build-checks the package on both `ubuntu-latest` and `windows-latest`.
-- After that, it builds the release distributions (`sdist` and `wheel`) on Ubuntu and runs `twine check`.
+- Since this package is a universal pure Python package, the multi-OS jobs are for compatibility validation rather than producing OS-specific artifacts.
+- After that, it builds the release distributions (`sdist` and `py3-none-any` wheel) once on Ubuntu and runs `twine check`.
 
 ## Publishing to PyPI
 
 PyPI publication is handled by the same manual workflow.
 
 - Create a Git tag such as `v0.5.1`.
-- In `Run workflow`, select that tag in `Use workflow from`.
-- Set `publish_to_pypi` to `true` and run the workflow.
-- The publish job will upload the built distributions to PyPI.
+- In `Run workflow`, start the workflow normally from the default branch.
+- Set `publish_to_pypi` to `true`.
+- Set `release_tag` to the tag name, for example `v0.5.1`.
+- The workflow checks out that tag, builds the distributions, and uploads them to PyPI.
 - PyPI Trusted Publishing must be configured for this GitHub repository in advance.
 
 ## License

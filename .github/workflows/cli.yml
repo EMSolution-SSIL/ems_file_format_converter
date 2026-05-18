@@ -4,10 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       publish_to_pypi:
-        description: "Publish to PyPI (run this workflow from a v*.*.* tag)"
+        description: "Publish to PyPI"
         required: true
         default: false
         type: boolean
+      release_tag:
+        description: "Version tag to build/publish from when publishing, for example v0.5.1"
+        required: false
+        type: string
+
+env:
+  CHECKOUT_REF: ${{ inputs.publish_to_pypi && inputs.release_tag || github.ref }}
 
 jobs:
   test:
@@ -19,6 +26,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: actions/setup-python@v5
         with:
@@ -45,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: actions/setup-python@v5
         with:
@@ -67,7 +78,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: build
-    if: ${{ inputs.publish_to_pypi && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ inputs.publish_to_pypi && startsWith(inputs.release_tag, 'v') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -75,6 +86,14 @@ jobs:
       name: pypi
       url: https://pypi.org/p/ems-file-format-converter
     steps:
+      - name: Validate release tag input
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.release_tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_tag must match v*.*.* when publish_to_pypi is true."
+            exit 1
+          fi
+
       - name: Download distributions
         uses: actions/download-artifact@v4
         with:
