@@ -1,15 +1,47 @@
 name: CI and Publish
 
 on:
-  push:
-    branches: [main]
-    tags:
-      - "v*.*.*"
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: "Publish to PyPI (run this workflow from a v*.*.* tag)"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   test:
+    name: Test and build check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install project and test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build pytest
+          python -m pip install .
+
+      - name: Run tests
+        run: |
+          pytest -q
+
+      - name: Build package
+        run: |
+          python -m build
+
+  build:
+    name: Build release distributions
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,14 +49,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
-      - name: Install project and test deps
+      - name: Build distributions
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
-          python -m pip install .
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
 
-      - name: Run tests
-        run: |
-          pytest -q
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/*
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    if: ${{ inputs.publish_to_pypi && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ems-file-format-converter
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
