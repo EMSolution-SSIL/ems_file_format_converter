@@ -6,12 +6,20 @@
 - **対応フォーマット**: ATLAS（メッシュ・ポスト）、UNV（メッシュ・ポスト）、Femap NEU（メッシュ・ポスト）
 - **メタデータ保持**: Node ID、Element ID、物性番号（`iprop`）を可能な限り保持
 - **CLI**: 単一のCLIから変換・ポスト入出力が可能
-- **テスト/CI**: `pytest` 完備、GitHub Actionsで自動テストとタグ時のPyPI公開
+- **ユニバーサルパッケージ**: OS依存のネイティブ拡張を含まない pure Python パッケージ
+- **テスト/CI**: `pytest` 完備、GitHub Actionsで `ubuntu-latest` / `windows-latest` の手動CI実行に対応
+- **PyPI公開**: GitHub Actionsから手動でPyPI公開可能
 
 ## インストール
 事前にPython 3.10以上が必要です。
 
-Releaseに添付した`whl`（Wheel）ファイルからのインストールを推奨します。
+PyPI からインストールできます。
+
+```powershell
+pip install ems-file-format-converter
+```
+
+Releaseに添付した`whl`（Wheel）ファイルからのインストール、またはローカルビルドも可能です。
 
 ```powershell
 # 例: ダウンロードしたWHLをインストール
@@ -73,6 +81,26 @@ UNVやFemap NEUも同様に `ems_file_format_converter.unv` / `ems_file_format_c
 pytest -q
 ```
 
+## GitHub Actions ワークフロー
+
+GitHub Actions の `CI and Publish` ワークフローは手動実行専用です。`push` や `pull_request` では起動しません。
+
+- GitHub の `Actions` タブから `CI and Publish` を選び、`Run workflow` を実行します。
+- 通常のCI確認では `publish_to_pypi` を `false` にします。
+- この場合、`ubuntu-latest` と `windows-latest` の両方でテストと `python -m build` によるビルド確認を行います。
+- 本パッケージはユニバーサルな pure Python パッケージのため、OSごとに別配布物を作るのではなく、互換性確認のために複数OSで検証しています。
+- 配布物（`sdist` と `py3-none-any` wheel）はUbuntu上で1回だけ生成し、`twine check` を実行します。
+
+## PyPI 公開
+
+PyPI公開も同じワークフローから手動で行います。
+
+- あらかじめ `v0.5.1` のような `v*.*.*` 形式のGitタグを作成しておきます。
+- `Run workflow` 実行時は通常どおりデフォルトブランチから起動します。
+- `publish_to_pypi` を `true` にし、`release_tag` に `v0.5.1` のようなタグ名を入力して実行します。
+- ワークフローはそのタグをチェックアウトしてビルドし、ビルド済み配布物をPyPIへ公開します。
+- 公開にはPyPI側で GitHub Actions Trusted Publishing の設定が必要です。
+
 ## ライセンス
 
 MITライセンスです。`LICENSE` を参照してください。
@@ -80,5 +108,3 @@ MITライセンスです。`LICENSE` を参照してください。
 ## 英語版README
 
 英語版は `README_en.md` を参照してください。
-# ems_file_format_converter
-CAE file format converter

@@ -6,12 +6,20 @@ A lightweight converter for CAE mesh and post data. Supports formats used by Sci
 - **Supported formats**: ATLAS (mesh & post), UNV (mesh & post), Femap NEU (mesh & post)
 - **Metadata preservation**: Node ID, Element ID, and `iprop` when available
 - **CLI**: Single entry point for conversions and post I/O
-- **Tests/CI**: `pytest` included; GitHub Actions runs tests and publishes on tagged releases
+- **Universal package**: Pure Python package with no OS-specific native extension
+- **Tests/CI**: `pytest` included; GitHub Actions can run manual CI on `ubuntu-latest` and `windows-latest`
+- **PyPI publishing**: Manual publish to PyPI is supported from GitHub Actions
 
 ## Installation
 Requires Python 3.10+.
 
-Please install from the Wheel attached to a Release (or build locally):
+Install from PyPI:
+
+```powershell
+pip install ems-file-format-converter
+```
+
+You can also install from a Wheel attached to a Release or build locally:
 
 ```powershell
 # Install from a downloaded Wheel
@@ -72,6 +80,27 @@ For UNV and Femap NEU use `ems_file_format_converter.unv` and `ems_file_format_c
 ```powershell
 pytest -q
 ```
+
+## GitHub Actions Workflow
+
+The `CI and Publish` GitHub Actions workflow is manual-only. It does not run on `push` or `pull_request`.
+
+- Open the `Actions` tab in GitHub and run `CI and Publish`.
+- For normal CI validation, leave `publish_to_pypi` set to `false`.
+- The workflow then tests and build-checks the package on both `ubuntu-latest` and `windows-latest`.
+- Since this package is a universal pure Python package, the multi-OS jobs are for compatibility validation rather than producing OS-specific artifacts.
+- After that, it builds the release distributions (`sdist` and `py3-none-any` wheel) once on Ubuntu and runs `twine check`.
+
+## Publishing to PyPI
+
+PyPI publication is handled by the same manual workflow.
+
+- Create a Git tag such as `v0.5.1`.
+- In `Run workflow`, start the workflow normally from the default branch.
+- Set `publish_to_pypi` to `true`.
+- Set `release_tag` to the tag name, for example `v0.5.1`.
+- The workflow checks out that tag, builds the distributions, and uploads them to PyPI.
+- PyPI Trusted Publishing must be configured for this GitHub repository in advance.
 
 ## License
 
