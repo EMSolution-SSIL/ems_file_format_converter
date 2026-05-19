@@ -24,11 +24,17 @@ pip install --force-reinstall dist/ems_file_format_converter-0.1.0-py3-none-any.
 
 ## CLI Usage
 
-Convert meshes (input auto-detected by extension, specify output format):
+Convert meshes (input auto-detected by extension, output format determined by file extension):
 
 ```powershell
-ems-file-format-converter --in mesh_sample.atl --out out.unv
-ems-file-format-converter --in sample_mesh.unv --out out.atl
+ems-file-format-converter mesh_sample.atl out.unv
+ems-file-format-converter sample_mesh.unv out.atl
+```
+
+Explicitly specify formats:
+
+```powershell
+ems-file-format-converter mesh_sample.dat out.unv --informat atl --outformat unv
 ```
 
 Post data I/O (mode: `components|scalar|vector|vector+scalar`):

@@ -34,6 +34,42 @@ FEMAP_TO_MESHIO: Dict[str, Tuple[str, int]] = {
 
 MESHIO_TO_FEMAP: Dict[str, Tuple[str, int]] = {v[0]: (k, v[1]) for k, v in FEMAP_TO_MESHIO.items()}
 
+TITLE_PREFIX_BY_NAME: Dict[str, str] = {
+    "magnetic": "BMAG",
+    "current": "CURR",
+    "disp": "DISP",
+    "electric": "ELEC",
+    "surface_current": "SCUR",
+    "force_j_b": "LFOR",
+    "force": "NFOR",
+    "heat": "HEAT",
+    "magnet": "MAGNET",
+    "iron_loss": "IRON_LOSS",
+}
+
+
+def infer_title_prefix_from_filename(path: str | Path, default: str = "BMAG") -> str:
+    """Infer FEMAP post title prefix from a filename.
+
+    Examples: magnetic_*.neu -> BMAG, current_*.neu -> CURR.
+    Returns ``default`` when no known keyword is found.
+    """
+    stem = Path(path).stem.lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", stem).strip("_")
+
+    items = sorted(TITLE_PREFIX_BY_NAME.items(), key=lambda kv: len(kv[0]), reverse=True)
+    for key, prefix in items:
+        key_norm = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+        if re.search(rf"(^|_){re.escape(key_norm)}($|_)", normalized):
+            return prefix
+
+    for key, prefix in items:
+        key_norm = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+        if key_norm and key_norm in normalized:
+            return prefix
+
+    return default
+
 
 def read_mesh(path: str | Path) -> meshio.Mesh:
     """Read Femap Neutral (.neu) mesh supporting v4.1/v10.3 samples.
@@ -644,7 +680,11 @@ def read_post(path: str | Path) -> List[dict]:
 
 
 def write_post(
-    path: str | Path, steps: List[dict], mode: str | None = None, style: str = "451", title_prefix: str = "BMAG"
+    path: str | Path,
+    steps: List[dict],
+    mode: str | None = None,
+    style: str = "451",
+    title_prefix: str | None = None,
 ) -> None:
     """Write Femap Neutral post data using 450 + 451 (default) or 1051 sections.
 
@@ -653,6 +693,10 @@ def write_post(
     - 1051: datasets with range lines "start,end,values..."
     """
     path = Path(path)
+    resolved_title_prefix = (
+        title_prefix.strip().upper() if isinstance(title_prefix, str) and title_prefix.strip()
+        else infer_title_prefix_from_filename(path)
+    )
     out: List[str] = []
 
     # file header
@@ -741,7 +785,7 @@ def write_post(
         if elems and ncomp_e > 0:
             # Preserve original element ID order as provided in steps
             ids_sorted_e = list(elems.keys())
-            datasets_e = [(60030 + c, f"{title_prefix}-elem-{c}", c) for c in range(1, ncomp_e + 1)]
+            datasets_e = [(60030 + c, f"{resolved_title_prefix}-elem-{c}", c) for c in range(1, ncomp_e + 1)]
             for dsid, title, comp_idx in datasets_e:
                 if style == "1051":
                     # Header
@@ -780,7 +824,7 @@ def write_post(
         if nodes and ncomp_n > 0:
             # Preserve original node ID order as provided in steps
             ids_sorted_n = list(nodes.keys())
-            datasets_n = [(30 + c, f"{title_prefix}-node-{c}", c) for c in range(1, ncomp_n + 1)]
+            datasets_n = [(30 + c, f"{resolved_title_prefix}-node-{c}", c) for c in range(1, ncomp_n + 1)]
             for dsid, title, comp_idx in datasets_n:
                 if style == "1051":
                     # Header

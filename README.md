@@ -24,11 +24,17 @@ pip install --force-reinstall dist/ems_file_format_converter-0.1.0-py3-none-any.
 
 ## 使い方（CLI）
 
-メッシュ変換（入力は拡張子で自動判別、出力形式を指定）:
+メッシュ変換（入力は拡張子で自動判別、出力形式は拡張子で判別）:
 
 ```powershell
-ems-file-format-converter --in mesh_sample.atl --out out.unv
-ems-file-format-converter --in sample_mesh.unv --out out.atl
+ems-file-format-converter mesh_sample.atl out.unv
+ems-file-format-converter sample_mesh.unv out.atl
+```
+
+形式を明示的に指定する場合:
+
+```powershell
+ems-file-format-converter mesh_sample.dat out.unv --informat atl --outformat unv
 ```
 
 ポストデータの読み書き（モード指定: `components|scalar|vector|vector+scalar`）:

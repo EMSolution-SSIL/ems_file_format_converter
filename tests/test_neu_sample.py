@@ -55,6 +55,41 @@ def test_read_and_roundtrip_neu_post(tmp_path: Path):
         assert out.stat().st_size > 0, "Output file is empty"
 
 
+def test_infer_title_prefix_from_filename_map():
+    assert neu.infer_title_prefix_from_filename("magnetic.neu") == "BMAG"
+    assert neu.infer_title_prefix_from_filename("current_org.neu") == "CURR"
+    assert neu.infer_title_prefix_from_filename("disp_case.neu") == "DISP"
+    assert neu.infer_title_prefix_from_filename("electric.neu") == "ELEC"
+    assert neu.infer_title_prefix_from_filename("surface_current_01.neu") == "SCUR"
+    assert neu.infer_title_prefix_from_filename("force_J_B.neu") == "LFOR"
+    assert neu.infer_title_prefix_from_filename("force_result.neu") == "NFOR"
+    assert neu.infer_title_prefix_from_filename("heat_case.neu") == "HEAT"
+    assert neu.infer_title_prefix_from_filename("magnet_result.neu") == "MAGNET"
+    assert neu.infer_title_prefix_from_filename("iron_loss.neu") == "IRON_LOSS"
+    assert neu.infer_title_prefix_from_filename("unknown_case.neu") == "BMAG"
+
+
+def test_write_post_uses_inferred_title_prefix(tmp_path: Path):
+    out = tmp_path / "current.neu"
+    steps = [{"step": 1, "substep": 1, "time": 0.0, "elements": {}, "nodes": {1: {"component1": 2.5}}}]
+
+    neu.write_post(out, steps, mode="components")
+
+    txt = out.read_text(encoding="utf-8", errors="ignore")
+    assert "CURR-node-1" in txt
+
+
+def test_write_post_explicit_title_prefix_overrides_inference(tmp_path: Path):
+    out = tmp_path / "current.neu"
+    steps = [{"step": 1, "substep": 1, "time": 0.0, "elements": {}, "nodes": {1: {"component1": 2.5}}}]
+
+    neu.write_post(out, steps, mode="components", title_prefix="BMAG")
+
+    txt = out.read_text(encoding="utf-8", errors="ignore")
+    assert "BMAG-node-1" in txt
+    assert "CURR-node-1" not in txt
+
+
 if __name__ == "__main__":
     test_read_and_roundtrip_neu_mesh(Path("."))
     test_read_and_roundtrip_neu_post(Path("."))

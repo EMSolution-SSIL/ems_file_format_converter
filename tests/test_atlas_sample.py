@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from ems_file_format_converter import atlas
 from ems_file_format_converter.post_components import components_from_record
@@ -52,6 +53,28 @@ def test_read_and_roundtrip_atlas_mesh(tmp_path: Path):
     assert iprops2 == orig_iprops
 
 
+def test_read_motor_atlas_mesh_with_multiple_grid_conc_blocks():
+    sample_path = Path(__file__).resolve().parents[1] / "data" / "motor" / "post_geom.atl"
+    assert sample_path.exists(), f"Missing sample file: {sample_path}"
+
+    mesh = atlas.read_mesh(sample_path)
+
+    assert mesh.points.shape == (48, 3)
+    assert len(mesh.cells) == 1
+    blk = mesh.cells[0]
+    data = blk.data if hasattr(blk, "data") else blk[1]
+    assert data.shape[0] == 12
+    assert (blk.type if hasattr(blk, "type") else blk[0]) == "hexahedron"
+
+    assert "id" in mesh.point_data
+    np.testing.assert_equal(len(mesh.point_data["id"]), 48)
+
+    assert "element_id" in mesh.cell_data
+    assert "property_id" in mesh.cell_data
+    np.testing.assert_equal(len(mesh.cell_data["element_id"][0]), 12)
+    np.testing.assert_equal(len(mesh.cell_data["property_id"][0]), 12)
+
+
 def test_read_and_roundtrip_atlas_post(tmp_path: Path):
     sample = Path(__file__).resolve().parents[1] / "sample" / "post_sample.atl"
     assert sample.exists(), f"Missing sample file: {sample}"
@@ -95,6 +118,44 @@ def test_read_and_roundtrip_atlas_post(tmp_path: Path):
             np.testing.assert_allclose(
                 components_from_record(va), components_from_record(vb), rtol=0, atol=1e-12
             )
+
+
+def test_read_atlas_post_warns_when_eval_missing(tmp_path: Path):
+    sample = tmp_path / "stre_only.atl"
+    sample.write_text(
+        "STEP    (2I5,E12.0)\n"
+        "    1     1   0.000e+00\n"
+        "STRE   1(I8,6E14.0)\n"
+        "       1    1.00000e+00\n"
+        "      -1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="missing EVAL section"):
+        steps = atlas.read_post(sample)
+
+    assert len(steps) == 1
+    assert steps[0]["elements"] == {}
+    assert 1 in steps[0]["nodes"]
+
+
+def test_read_atlas_post_warns_when_stre_missing(tmp_path: Path):
+    sample = tmp_path / "eval_only.atl"
+    sample.write_text(
+        "STEP    (2I5,E12.0)\n"
+        "    1     1   0.000e+00\n"
+        "EVAL   1(I8,6E14.0)\n"
+        "       1    1.00000e+00\n"
+        "      -1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="missing STRE section"):
+        steps = atlas.read_post(sample)
+
+    assert len(steps) == 1
+    assert 1 in steps[0]["elements"]
+    assert steps[0]["nodes"] == {}
 
 
 if __name__ == "__main__":

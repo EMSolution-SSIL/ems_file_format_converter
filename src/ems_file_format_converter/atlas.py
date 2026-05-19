@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Tuple
+import warnings
 
 import numpy as np
 
@@ -35,7 +36,7 @@ def _read_nodes(lines: List[str]) -> Dict[int, Tuple[float, float, float]]:
         if not line:
             continue
         if line.startswith("-1"):
-            break
+            continue
         parts = line.split()
         nid = int(parts[0])
         x, y, z = map(float, parts[1:4])
@@ -59,7 +60,7 @@ def _read_elements(
         if not line:
             continue
         if line.startswith("-1"):
-            break
+            continue
 
         parts = line.split()
         ielem = int(parts[0]) # element ID
@@ -250,52 +251,123 @@ def read_post(path: str | Path) -> List[dict]:
     with path.open() as f:
         lines = f.readlines()
 
-    it = iter(lines)
     steps: List[dict] = []
 
-    def _read_block() -> List[str]:
+    def _next_nonempty(index: int) -> int:
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        return index
+
+    def _read_block(index: int) -> tuple[List[str], int]:
         block: List[str] = []
-        for raw in it:
-            s = raw.strip()
+        index = _next_nonempty(index)
+        while index < len(lines):
+            s = lines[index].strip()
             if not s:
+                index += 1
                 continue
             if s.startswith("-1"):
-                break
+                return block, index + 1
+            if s.startswith("STEP"):
+                return block, index
             block.append(s)
-        return block
+            index += 1
+        return block, index
 
-    for raw in it:
-        s = raw.strip()
-        if not s:
+    index = 0
+    while index < len(lines):
+        index = _next_nonempty(index)
+        if index >= len(lines):
+            break
+
+        s = lines[index].strip()
+        if not s.startswith("STEP"):
+            index += 1
             continue
-        if s.startswith("STEP"):
-            nxt = next(it).strip()
-            p = nxt.split()
-            step = int(p[0])
-            sub = int(p[1])
-            time = float(p[2])
 
-            step_rec = {"step": step, "substep": sub, "time": time, "elements": {}, "nodes": {}}
+        index += 1
+        index = _next_nonempty(index)
+        if index >= len(lines):
+            raise ValueError("Missing STEP values after STEP header")
 
-            hdr = next(it).strip()
-            if not hdr.startswith("EVAL"):
-                raise ValueError("Expected EVAL section after STEP")
-            for row in _read_block():
-                parts = row.split()
-                eid = int(parts[0])
-                vals = [float(x) for x in parts[1:]]
-                step_rec["elements"][eid] = record_from_components(vals)
+        p = lines[index].strip().split()
+        if len(p) < 3:
+            raise ValueError("Invalid STEP values line")
+        step = int(p[0])
+        sub = int(p[1])
+        time = float(p[2])
+        index += 1
 
-            hdr = next(it).strip()
-            if not hdr.startswith("STRE"):
-                raise ValueError("Expected STRE section after EVAL")
-            for row in _read_block():
-                parts = row.split()
-                nid = int(parts[0])
-                vals = [float(x) for x in parts[1:]]
-                step_rec["nodes"][nid] = record_from_components(vals)
+        step_rec = {"step": step, "substep": sub, "time": time, "elements": {}, "nodes": {}}
+        seen_eval = False
+        seen_stre = False
 
-            steps.append(step_rec)
+        while index < len(lines):
+            index = _next_nonempty(index)
+            if index >= len(lines):
+                break
+
+            hdr = lines[index].strip()
+            if hdr.startswith("STEP"):
+                break
+
+            if hdr.startswith("EVAL"):
+                seen_eval = True
+                rows, index = _read_block(index + 1)
+                for row in rows:
+                    parts = row.split()
+                    eid = int(parts[0])
+                    vals = [float(x) for x in parts[1:]]
+                    step_rec["elements"][eid] = record_from_components(vals)
+                continue
+
+            if hdr.startswith("STRE"):
+                seen_stre = True
+                rows, index = _read_block(index + 1)
+                for row in rows:
+                    parts = row.split()
+                    nid = int(parts[0])
+                    vals = [float(x) for x in parts[1:]]
+                    step_rec["nodes"][nid] = record_from_components(vals)
+                continue
+
+            # displacement file have only Node data as the same as STRE 
+            if hdr.startswith("DISP"):
+                seen_stre = True
+                rows, index = _read_block(index + 1)
+                for row in rows:
+                    parts = row.split()
+                    nid = int(parts[0])
+                    vals = [float(x) for x in parts[1:]]
+                    step_rec["nodes"][nid] = record_from_components(vals)
+                continue
+
+            warnings.warn(
+                f"Unexpected ATLAS post section '{hdr}'. Skipping until the next STEP header.",
+                UserWarning,
+                stacklevel=2,
+            )
+            while index < len(lines):
+                s = lines[index].strip()
+                if s.startswith("STEP"):
+                    break
+                index += 1
+            break
+
+        if not seen_eval:
+            warnings.warn(
+                f"STEP {step}/{sub} is missing EVAL section; reading nodes only.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if not seen_stre:
+            warnings.warn(
+                f"STEP {step}/{sub} is missing STRE section; reading elements only.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        steps.append(step_rec)
 
     return steps
 
