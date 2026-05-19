@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ems-file-format-converter"
-version = "0.5.1"
+dynamic = ["version"]
 description = "CAE file format converter (Femap neutral, I-DEAS UNV, ATLAS, ...)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,3 +17,6 @@ ems-file-format-converter = "ems_file_format_converter.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["ems_file_format_converter*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "ems_file_format_converter.__version__"}
