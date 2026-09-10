@@ -1,9 +1,9 @@
 # EMS File Format Converter
 
-このリポジトリは、CAE向けメッシュ／ポストデータの簡易コンバータです。サイエンスソリューションズ社（Science Solutions International Laboratory, Inc.; SSIL）の電磁界解析ソフトウェア「EMSolution」で用いるATLASテキストファイルフォーマット（`.atl`）、I‑DEAS Universal file format（`.unv`）、Femap Neutral file format（`.neu`）の読み書きに対応し、IDや物性番号などのメタデータのラウンドトリップ保存を重視しています。
+このリポジトリは、CAE向けメッシュ／ポストデータの簡易コンバータです。サイエンスソリューションズ社（Science Solutions International Laboratory, Inc.; SSIL）の電磁界解析ソフトウェア「EMSolution」で用いるATLASテキストファイルフォーマット（`.atl`）、I‑DEAS Universal file format（`.unv`）、Femap Neutral file format（`.neu`）、Gmsh mesh format（`.msh`）の読み書きに対応し、IDや物性番号などのメタデータのラウンドトリップ保存を重視しています。
 
 ## 特長
-- **対応フォーマット**: ATLAS（メッシュ・ポスト）、UNV（メッシュ・ポスト）、Femap NEU（メッシュ・ポスト）
+- **対応フォーマット**: ATLAS（メッシュ・ポスト）、UNV（メッシュ・ポスト）、Femap NEU（メッシュ・ポスト）、Gmsh MSH（メッシュ）
 - **メタデータ保持**: Node ID、Element ID、物性番号（`iprop`）を可能な限り保持
 - **CLI**: 単一のCLIから変換・ポスト入出力が可能
 - **ユニバーサルパッケージ**: OS依存のネイティブ拡張を含まない pure Python パッケージ
@@ -37,6 +37,7 @@ pip install --force-reinstall dist/ems_file_format_converter-0.1.0-py3-none-any.
 ```powershell
 ems-file-format-converter mesh_sample.atl out.unv
 ems-file-format-converter sample_mesh.unv out.atl
+ems-file-format-converter model.neu model.msh --progress
 ```
 
 形式を明示的に指定する場合:
@@ -61,14 +62,21 @@ ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --pos
 - ATLAS: `.atl`
 - UNV: `.unv`
 - Femap Neutral: `.neu`
+- Gmsh: `.msh`
 
 ## Python API（例）
 
 ```python
-from ems_file_format_converter import atlas
-mesh = atlas.read_mesh("sample/mesh_sample.atl")
-atlas.write_mesh("out.atl", mesh)
+from ems_file_format_converter import read_mesh, write_mesh
 
+# 拡張子から形式を自動判別する統一API
+mesh = read_mesh("sample/mesh_sample.atl")
+write_mesh("out.neu", mesh)
+
+# 大規模なFemap NEUでは読み込み進捗を表示可能
+large_mesh = read_mesh("large_model.neu", progress=True)
+
+from ems_file_format_converter import atlas
 steps = atlas.read_post("sample/post_sample.atl")
 atlas.write_post("out_post.atl", steps, mode="components")
 ```

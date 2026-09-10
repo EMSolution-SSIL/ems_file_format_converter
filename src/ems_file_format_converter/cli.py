@@ -1,27 +1,33 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Science Solutions International Laboratory, Inc.
-# ems-file-format-converter/cli.py
 from pathlib import Path
 import argparse
-import meshio
 
 from . import atlas
-from . import femap as neu
-from . import unv
-
-READERS = {
-    ".neu": neu.read_mesh,
-    ".unv": unv.read_mesh,
-    ".atl": atlas.read_mesh,  # ATLAS 独自拡張子（社内仕様）
-}
+from .io import read_mesh, write_mesh
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input")
     parser.add_argument("output")
-    parser.add_argument("--informat", choices=["neu", "unv", "atl"])
-    parser.add_argument("--outformat", help="meshio の file_format を指定 (任意)")
+    parser.add_argument(
+        "--informat",
+        choices=["neu", "femap", "unv", "atl", "atlas", "msh", "gmsh"],
+    )
+    parser.add_argument("--outformat", help="meshio file_format or EMS format")
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="show Femap NEU node/element loading progress",
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=500_000,
+        metavar="N",
+        help="report Femap NEU progress every N records (default: 500000)",
+    )
     # Post data options
     parser.add_argument("--post-in", help="post data input file (STEP/EVAL/STRE)")
     parser.add_argument("--post-out", help="post data output file")
@@ -46,31 +52,10 @@ def main():
         atlas.write_post(Path(args.post_out), steps, mode=args.post_mode)
         return
 
-    # 入力フォーマット判定 (mesh)
-    if args.informat:
-        informat = args.informat
-    else:
-        informat = in_path.suffix.lstrip(".").lower()
-
-    if informat in ("neu", "unv", "atl"):
-        if informat == "neu":
-            mesh = neu.read_mesh(in_path)
-        elif informat == "unv":
-            mesh = unv.read_mesh(in_path)
-        else:
-            # "atlas" または "atl"
-            mesh = atlas.read_mesh(in_path)
-    else:
-        # meshio がそのまま読める形式は meshio に任せる
-        mesh = meshio.read(in_path)
-
-    # Decide writer
-    outfmt = (args.outformat or "").lower() if args.outformat else None
-    if (outfmt in ("atlas", "atl")) or (outfmt is None and out_path.suffix.lower() == ".atl"):
-        atlas.write_mesh(out_path, mesh)
-    elif (outfmt == "unv") or (outfmt is None and out_path.suffix.lower() == ".unv"):
-        unv.write_mesh(out_path, mesh)
-    elif (outfmt == "neu") or (outfmt is None and out_path.suffix.lower() == ".neu"):
-        neu.write_mesh(out_path, mesh)
-    else:
-        meshio.write(out_path, mesh, file_format=args.outformat)
+    mesh = read_mesh(
+        in_path,
+        file_format=args.informat,
+        progress=args.progress,
+        progress_interval=args.progress_interval,
+    )
+    write_mesh(out_path, mesh, file_format=args.outformat)

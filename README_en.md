@@ -1,9 +1,9 @@
 # EMS File Format Converter
 
-A lightweight converter for CAE mesh and post data. Supports formats used by Science Solutions International Laboratory, Inc. (SSIL) electromagnetic solver "EMSolution": ATLAS test file format (`.atl`), I‑DEAS universal file format (`.unv`), and Femap Neutral file format (`.neu`), focusing on round‑tripping metadata such as IDs and property numbers.
+A lightweight converter for CAE mesh and post data. Supports formats used by Science Solutions International Laboratory, Inc. (SSIL) electromagnetic solver "EMSolution": ATLAS text file format (`.atl`), I‑DEAS universal file format (`.unv`), Femap Neutral file format (`.neu`), and Gmsh mesh format (`.msh`), focusing on round-tripping metadata such as IDs and property numbers.
 
 ## Features
-- **Supported formats**: ATLAS (mesh & post), UNV (mesh & post), Femap NEU (mesh & post)
+- **Supported formats**: ATLAS (mesh & post), UNV (mesh & post), Femap NEU (mesh & post), Gmsh MSH (mesh)
 - **Metadata preservation**: Node ID, Element ID, and `iprop` when available
 - **CLI**: Single entry point for conversions and post I/O
 - **Universal package**: Pure Python package with no OS-specific native extension
@@ -37,6 +37,7 @@ Convert meshes (input auto-detected by extension, output format determined by fi
 ```powershell
 ems-file-format-converter mesh_sample.atl out.unv
 ems-file-format-converter sample_mesh.unv out.atl
+ems-file-format-converter model.neu model.msh --progress
 ```
 
 Explicitly specify formats:
@@ -61,14 +62,21 @@ Supported extensions:
 - ATLAS: `.atl`
 - UNV: `.unv`
 - Femap Neutral: `.neu`
+- Gmsh: `.msh`
 
 ## Python API (examples)
 
 ```python
-from ems_file_format_converter import atlas
-mesh = atlas.read_mesh("sample/mesh_sample.atl")
-atlas.write_mesh("out.atl", mesh)
+from ems_file_format_converter import read_mesh, write_mesh
 
+# Unified API: formats are inferred from file extensions
+mesh = read_mesh("sample/mesh_sample.atl")
+write_mesh("out.neu", mesh)
+
+# Optional progress output for large Femap Neutral files
+large_mesh = read_mesh("large_model.neu", progress=True)
+
+from ems_file_format_converter import atlas
 steps = atlas.read_post("sample/post_sample.atl")
 atlas.write_post("out_post.atl", steps, mode="components")
 ```
