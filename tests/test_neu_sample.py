@@ -42,6 +42,40 @@ def test_read_and_roundtrip_neu_mesh(tmp_path: Path):
         assert counts(mesh2) == counts(mesh)
 
 
+def test_read_femap_10_3_node_coordinates_before_trailing_status_fields(tmp_path: Path):
+    sample = tmp_path / "femap_10_3.neu"
+    sample.write_text(
+        """   -1
+   100
+<NULL>
+10.3,
+   -1
+   -1
+   403
+1,0,0,1,46,0,0,0,0,0,0,0.,100.,0.,0,0,
+2,0,0,1,46,0,0,0,0,0,0,134.,150.,0.,0,0,
+   -1
+   -1
+   404
+1,124,1,17,0,1,0,0,0,
+1,2,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0.,0.,0.,0,0,0,0,0,0,
+0.,0.,0.,
+0.,0.,0.,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   -1
+""",
+        encoding="utf-8",
+    )
+
+    mesh = neu.read_mesh(sample)
+
+    np.testing.assert_allclose(mesh.points, [[0.0, 100.0, 0.0], [134.0, 150.0, 0.0]])
+    assert mesh.cells[0].type == "line"
+    np.testing.assert_array_equal(mesh.cells[0].data, [[0, 1]])
+
+
 def test_read_and_roundtrip_neu_post(tmp_path: Path):
     for fname in ("post_sample451.neu", "post_sample1051.neu"):
         sample_path = Path(__file__).resolve().parents[1] / "sample" / fname

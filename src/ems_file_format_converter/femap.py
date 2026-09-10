@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from time import monotonic
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -71,7 +72,49 @@ def infer_title_prefix_from_filename(path: str | Path, default: str = "BMAG") ->
     return default
 
 
-def read_mesh(path: str | Path) -> meshio.Mesh:
+def _parse_classic_node_record(record: str) -> Tuple[int, float, float, float] | None:
+    """Parse a section-403 node record from Femap/EMSolution Neutral files.
+
+    The standard coordinate fields are CSV columns 12--14 (zero-based indices
+    11--13).  Femap 10.3 can append two status fields after Z, while EMSolution
+    4.41 ends the record at Z.  Reading the final three numeric values therefore
+    collapses 10.3 coordinates to the trailing status values.
+
+    A final-three-values fallback is retained for older compact records that do
+    not contain the standard 14 columns.
+    """
+
+    fields = [field.strip() for field in record.split(",")]
+    if not fields or not fields[0]:
+        return None
+    try:
+        node_id = int(fields[0])
+        if len(fields) >= 14:
+            x, y, z = (float(value) for value in fields[11:14])
+            return node_id, x, y, z
+    except ValueError:
+        return None
+
+    numeric_values: List[float] = []
+    for value in fields[1:]:
+        if not value:
+            continue
+        try:
+            numeric_values.append(float(value))
+        except ValueError:
+            continue
+    if len(numeric_values) < 3:
+        return None
+    x, y, z = numeric_values[-3:]
+    return node_id, x, y, z
+
+
+def read_mesh(
+    path: str | Path,
+    *,
+    progress: bool = False,
+    progress_interval: int = 500_000,
+) -> meshio.Mesh:
     """Read Femap Neutral (.neu) mesh supporting v4.1/v10.3 samples.
 
     Handles classic neutral sections:
@@ -79,227 +122,16 @@ def read_mesh(path: str | Path) -> meshio.Mesh:
       - 404: elements (descriptor line with count, followed by connectivity line)
     """
     path = Path(path)
-    with path.open(encoding="utf-8", errors="ignore") as f:
-        lines = [ln.rstrip() for ln in f]
-
+    if progress_interval <= 0:
+        raise ValueError("progress_interval must be positive")
+    reporter = _MeshReadProgress(path, progress_interval) if progress else None
     nodes: Dict[int, Tuple[float, float, float]] = {}
     # Store per-type elements as tuples: (connectivity, matid, eid)
     cells_by_type: Dict[str, List[Tuple[List[int], int, int]]] = {}
-
-    i = 0
-    n = len(lines)
-
-    def parse_csv_ints(s: str) -> List[int]:
-        return [int(x) for x in s.replace(" ", "").split(",") if x and x.replace("-", "").isdigit()]
-
-    def parse_csv_floats(s: str) -> List[float]:
-        parts = [x for x in s.replace(" ", "").split(",") if x]
-        vals: List[float] = []
-        for x in parts:
-            try:
-                vals.append(float(x))
-            except Exception:
-                pass
-        return vals
-
-    # First, handle our simple "$ Nodes"/"$ Elements" format if present
-    if any("$ Nodes" in ln for ln in lines) and any("$ Elements" in ln for ln in lines):
-        mode = None
-
-        def parse_node_line_ws(s: str) -> Tuple[int, float, float, float] | None:
-            parts = s.strip().split()
-            if len(parts) < 4:
-                return None
-            try:
-                nid = int(parts[0])
-                x, y, z = map(float, parts[1:4])
-                return nid, x, y, z
-            except Exception:
-                return None
-
-        def parse_elem_line_ws(s: str) -> Tuple[str, List[int], int, int] | None:
-            parts = s.strip().split()
-            if len(parts) < 3:
-                return None
-            try:
-                eid = int(parts[0])
-            except Exception:
-                return None
-            etok = parts[1].upper()
-            if etok not in FEMAP_TO_MESHIO:
-                return None
-            ctype, expected = FEMAP_TO_MESHIO[etok]
-            # collect integer tokens after the element token; some lines include property/material placeholders
-            try:
-                ints = [int(x) for x in parts[2:] if x.isdigit()]
-                # take last expected integers as node ids
-                nodes_list = ints[-expected:] if len(ints) >= expected else ints
-            except Exception:
-                return None
-            if len(nodes_list) != expected:
-                return None
-            # simplified format doesn't carry matid; set to 0
-            return ctype, nodes_list, 0, eid
-
-        for ln in lines:
-            s = ln.strip()
-            if not s:
-                continue
-            if s.startswith("$"):
-                if "Nodes" in s:
-                    mode = "nodes"
-                elif "Elements" in s:
-                    mode = "elements"
-                continue
-            if mode == "nodes":
-                p = parse_node_line_ws(s)
-                if p:
-                    nid, x, y, z = p
-                    nodes[nid] = (x, y, z)
-            elif mode == "elements":
-                p = parse_elem_line_ws(s)
-                if p:
-                    ctype, conn, matid, eid = p
-                    cells_by_type.setdefault(ctype, []).append((conn, matid, eid))
+    if _is_simple_mesh_format(path):
+        _read_simple_mesh(path, nodes, cells_by_type, reporter)
     else:
-        # Fallback: classic neutral sections 403/404
-        while i < n:
-            s = lines[i].strip()
-            i += 1
-            if not s:
-                continue
-            if s == "-1":
-                # next line may be section id
-                if i < n and lines[i].strip().isdigit():
-                    sec = int(lines[i].strip())
-                    i += 1
-                    if sec == 403:
-                        # nodes until next -1
-                        while i < n:
-                            t = lines[i].strip()
-                            if t == "-1":
-                                i += 1
-                                break
-                            # CSV record: id,..., x, y, z,
-                            ints = parse_csv_ints(t)
-                            floats = parse_csv_floats(t)
-                            if ints:
-                                nid = ints[0]
-                                if len(floats) >= 3:
-                                    x, y, z = floats[-3:]
-                                    nodes[nid] = (x, y, z)
-                            i += 1
-                    elif sec == 404:
-                        # elements: descriptor + connectivity, repeated until next -1
-                        while i < n:
-                            t = lines[i].strip()
-                            if t == "-1":
-                                i += 1
-                                break
-                            desc = t
-                            desc_ints = parse_csv_ints(desc)
-                            if len(desc_ints) < 5:
-                                i += 1
-                                continue
-                            # descriptor fields: [eid,124,matid,femap_type,topology]
-                            eid = desc_ints[0] # element id 
-                            matid = desc_ints[2] # property id
-                            topology = desc_ints[4] # element type code
-                            # read two connectivity lines (up to 20 ints)
-                            if i + 2 > n:
-                                break
-                            conn_line1 = lines[i + 1].strip()
-                            conn_line2 = lines[i + 2].strip() if (i + 2) < n else ""
-                            nodes20 = parse_csv_ints(conn_line1) + parse_csv_ints(conn_line2)
-                            nodes20 = [x for x in nodes20 if x != 0]
-                            # Determine meshio cell type and node reorder based on topology
-                            ctype = None
-                            conn: List[int] = []
-                            if topology == 0:
-                                ctype = "line"
-                                conn = nodes20[:2]
-                            elif topology == 9:
-                                ctype = "vertex"
-                                conn = nodes20[:1]
-                            elif topology == 2:
-                                ctype = "triangle"
-                                conn = nodes20[:3]
-                            elif topology == 3:
-                                # Tria6: reorder per C implementation
-                                ctype = "triangle6"
-                                if len(nodes20) >= 6:
-                                    n = nodes20[:6]
-                                    conn = [n[0], n[4], n[1], n[5], n[2], n[6 - 1]]  # n[6-1] == n[5]
-                                else:
-                                    conn = nodes20[:6]
-                            elif topology == 4:
-                                ctype = "quad"
-                                conn = nodes20[:4]
-                            elif topology == 5:
-                                # Quad8: reorder per C implementation
-                                ctype = "quad8"
-                                if len(nodes20) >= 8:
-                                    n = nodes20[:8]
-                                    conn = [n[0], n[4], n[1], n[5], n[2], n[6], n[3], n[7]]
-                                else:
-                                    conn = nodes20[:8]
-                            elif topology == 6:
-                                ctype = "tetra"
-                                conn = nodes20[:4]
-                            elif topology == 10:
-                                ctype = "tetra10"
-                                conn = nodes20[:10]
-                            elif topology == 7:
-                                ctype = "wedge"
-                                conn = nodes20[:6]
-                            elif topology == 11:
-                                # prism13 (wedge15 is typical in meshio; use wedge15 if 15, else fallback)
-                                if len(nodes20) >= 15:
-                                    ctype = "wedge15"
-                                    conn = nodes20[:15]
-                                else:
-                                    ctype = "wedge"
-                                    conn = nodes20[:6]
-                            elif topology == 14:
-                                ctype = "pyramid"
-                                conn = nodes20[:5]
-                            elif topology == 19:
-                                ctype = "pyramid13"
-                                conn = nodes20[:13]
-                            elif topology == 8:
-                                ctype = "hexahedron"
-                                conn = nodes20[:8]
-                            elif topology == 12:
-                                ctype = "hexahedron20"
-                                conn = nodes20[:20]
-                            else:
-                                # Fallback by length
-                                if len(nodes20) == 3:
-                                    ctype = "triangle"
-                                    conn = nodes20[:3]
-                                elif len(nodes20) == 4:
-                                    ctype = "quad"
-                                    conn = nodes20[:4]
-                                elif len(nodes20) == 8:
-                                    ctype = "hexahedron"
-                                    conn = nodes20[:8]
-                            if ctype and conn and len(conn) >= 1:
-                                cells_by_type.setdefault(ctype, []).append((conn, matid, eid))
-                            # advance past descriptor + two connectivity lines and skip aux lines until next -1 or data block end
-                            i += 3
-                            # Skip auxiliary lines (properties/zeros/float triplets)
-                            # Writer emits 4 aux lines; skip up to 4 here
-                            skip = 4
-                            while skip > 0 and i < n:
-                                if lines[i].strip() == "-1":
-                                    break
-                                i += 1
-                                skip -= 1
-                    else:
-                        # other sections: fast-forward until next -1
-                        while i < n and lines[i].strip() != "-1":
-                            i += 1
-            continue
+        _read_classic_mesh(path, nodes, cells_by_type, reporter)
 
     # Build mesh
     sorted_node_ids = sorted(nodes)
@@ -322,21 +154,249 @@ def read_mesh(path: str | Path) -> meshio.Mesh:
         cell_data.setdefault("property_id", []).append(np.array([mats[i] for i in keep_idx], dtype=int))
         cell_data.setdefault("element_id", []).append(np.array([eids[i] for i in keep_idx], dtype=int))
 
-    return meshio.Mesh(
+    mesh = meshio.Mesh(
         points=points, cells=cells, point_data={"id": np.array(sorted_node_ids, int)}, cell_data=cell_data
     )
+    if reporter is not None:
+        reporter.finish()
+    return mesh
 
-    # Build mesh
-    sorted_node_ids = sorted(nodes)
-    id2idx = {nid: i for i, nid in enumerate(sorted_node_ids)}
-    points = np.array([nodes[nid] for nid in sorted_node_ids], dtype=float)
 
-    cells = []
-    for ctype, conn_list in cells_by_type.items():
-        data = np.array([[id2idx[n] for n in conn] for conn in conn_list], dtype=int)
-        cells.append((ctype, data))
+class _MeshReadProgress:
+    def __init__(self, path: Path, interval: int) -> None:
+        self.path = path
+        self.interval = interval
+        self.nodes = 0
+        self.elements = 0
+        self._next_nodes = interval
+        self._next_elements = interval
+        self._started = monotonic()
+        size_gib = path.stat().st_size / (1024**3)
+        print(f"Femap read: start {path} ({size_gib:.2f} GiB)", flush=True)
 
-    return meshio.Mesh(points=points, cells=cells, point_data={"id": np.array(sorted_node_ids, int)})
+    def node(self) -> None:
+        self.nodes += 1
+        if self.nodes >= self._next_nodes:
+            self._report("nodes")
+            self._next_nodes += self.interval
+
+    def element(self) -> None:
+        self.elements += 1
+        if self.elements >= self._next_elements:
+            self._report("elements")
+            self._next_elements += self.interval
+
+    def finish(self) -> None:
+        self._report("complete")
+
+    def _report(self, phase: str) -> None:
+        elapsed = monotonic() - self._started
+        print(
+            f"Femap read: phase={phase} nodes={self.nodes:,} elements={self.elements:,} "
+            f"elapsed={elapsed:.1f}s",
+            flush=True,
+        )
+
+
+def _is_simple_mesh_format(path: Path) -> bool:
+    """Identify the compact dollar-delimited format without scanning the file."""
+
+    with path.open(encoding="utf-8", errors="ignore") as stream:
+        for line_index, line in enumerate(stream):
+            if line.strip().lower() == "$ nodes":
+                return True
+            if line_index >= 4095:
+                break
+    return False
+
+
+def _parse_csv_ints(value: str) -> List[int]:
+    return [
+        int(token)
+        for token in value.replace(" ", "").split(",")
+        if token and token.replace("-", "").isdigit()
+    ]
+
+
+def _read_simple_mesh(
+    path: Path,
+    nodes: Dict[int, Tuple[float, float, float]],
+    cells_by_type: Dict[str, List[Tuple[List[int], int, int]]],
+    reporter: _MeshReadProgress | None,
+) -> None:
+    mode = None
+    with path.open(encoding="utf-8", errors="ignore") as stream:
+        for line in stream:
+            value = line.strip()
+            if not value:
+                continue
+            if value.startswith("$"):
+                lowered = value.lower()
+                if "nodes" in lowered:
+                    mode = "nodes"
+                elif "elements" in lowered:
+                    mode = "elements"
+                continue
+            if mode == "nodes":
+                parts = value.split()
+                if len(parts) < 4:
+                    continue
+                try:
+                    node_id = int(parts[0])
+                    x, y, z = map(float, parts[1:4])
+                except ValueError:
+                    continue
+                nodes[node_id] = (x, y, z)
+                if reporter is not None:
+                    reporter.node()
+            elif mode == "elements":
+                parsed = _parse_simple_element(value)
+                if parsed is None:
+                    continue
+                cell_type, connectivity, material_id, element_id = parsed
+                cells_by_type.setdefault(cell_type, []).append(
+                    (connectivity, material_id, element_id)
+                )
+                if reporter is not None:
+                    reporter.element()
+
+
+def _parse_simple_element(value: str) -> Tuple[str, List[int], int, int] | None:
+    parts = value.split()
+    if len(parts) < 3:
+        return None
+    try:
+        element_id = int(parts[0])
+    except ValueError:
+        return None
+    element_token = parts[1].upper()
+    if element_token not in FEMAP_TO_MESHIO:
+        return None
+    cell_type, expected = FEMAP_TO_MESHIO[element_token]
+    integers = [int(token) for token in parts[2:] if token.isdigit()]
+    connectivity = integers[-expected:] if len(integers) >= expected else integers
+    if len(connectivity) != expected:
+        return None
+    return cell_type, connectivity, 0, element_id
+
+
+def _read_classic_mesh(
+    path: Path,
+    nodes: Dict[int, Tuple[float, float, float]],
+    cells_by_type: Dict[str, List[Tuple[List[int], int, int]]],
+    reporter: _MeshReadProgress | None,
+) -> None:
+    with path.open(encoding="utf-8", errors="ignore") as stream:
+        while True:
+            line = stream.readline()
+            if not line:
+                return
+            if line.strip() != "-1":
+                continue
+            section_line = stream.readline()
+            if not section_line:
+                return
+            section_value = section_line.strip()
+            if not section_value.isdigit():
+                continue
+            section = int(section_value)
+            if section == 403:
+                _read_classic_nodes(stream, nodes, reporter)
+            elif section == 404:
+                _read_classic_elements(stream, cells_by_type, reporter)
+            else:
+                _skip_classic_section(stream)
+
+
+def _read_classic_nodes(
+    stream,
+    nodes: Dict[int, Tuple[float, float, float]],
+    reporter: _MeshReadProgress | None,
+) -> None:
+    for line in stream:
+        value = line.strip()
+        if value == "-1":
+            return
+        parsed = _parse_classic_node_record(value)
+        if parsed is None:
+            continue
+        node_id, x, y, z = parsed
+        nodes[node_id] = (x, y, z)
+        if reporter is not None:
+            reporter.node()
+
+
+def _read_classic_elements(
+    stream,
+    cells_by_type: Dict[str, List[Tuple[List[int], int, int]]],
+    reporter: _MeshReadProgress | None,
+) -> None:
+    while True:
+        descriptor = stream.readline()
+        if not descriptor or descriptor.strip() == "-1":
+            return
+        descriptor_values = _parse_csv_ints(descriptor.strip())
+        if len(descriptor_values) < 5:
+            continue
+        connectivity_line_1 = stream.readline()
+        connectivity_line_2 = stream.readline()
+        if not connectivity_line_1 or not connectivity_line_2:
+            return
+        nodes20 = _parse_csv_ints(connectivity_line_1) + _parse_csv_ints(connectivity_line_2)
+        nodes20 = [node_id for node_id in nodes20 if node_id != 0]
+        element_id = descriptor_values[0]
+        material_id = descriptor_values[2]
+        topology = descriptor_values[4]
+        cell_type, connectivity = _classic_connectivity(topology, nodes20)
+        if cell_type is not None and connectivity:
+            cells_by_type.setdefault(cell_type, []).append(
+                (connectivity, material_id, element_id)
+            )
+            if reporter is not None:
+                reporter.element()
+        for _ in range(4):
+            auxiliary = stream.readline()
+            if not auxiliary or auxiliary.strip() == "-1":
+                return
+
+
+def _classic_connectivity(topology: int, nodes20: List[int]) -> Tuple[str | None, List[int]]:
+    mapping = {
+        0: ("line", 2),
+        9: ("vertex", 1),
+        2: ("triangle", 3),
+        4: ("quad", 4),
+        6: ("tetra", 4),
+        10: ("tetra10", 10),
+        7: ("wedge", 6),
+        14: ("pyramid", 5),
+        19: ("pyramid13", 13),
+        8: ("hexahedron", 8),
+        12: ("hexahedron20", 20),
+    }
+    if topology == 3:
+        values = nodes20[:6]
+        if len(values) < 6:
+            return "triangle6", values
+        return "triangle6", [values[0], values[4], values[1], values[5], values[2], values[5]]
+    if topology == 5:
+        values = nodes20[:8]
+        if len(values) < 8:
+            return "quad8", values
+        return "quad8", [values[0], values[4], values[1], values[5], values[2], values[6], values[3], values[7]]
+    if topology == 11:
+        return ("wedge15", nodes20[:15]) if len(nodes20) >= 15 else ("wedge", nodes20[:6])
+    if topology in mapping:
+        cell_type, count = mapping[topology]
+        return cell_type, nodes20[:count]
+    fallback = {3: "triangle", 4: "quad", 8: "hexahedron"}.get(len(nodes20))
+    return fallback, nodes20 if fallback is not None else []
+
+
+def _skip_classic_section(stream) -> None:
+    for line in stream:
+        if line.strip() == "-1":
+            return
 
 
 def file_header(out: List[str]) -> List[str]:
