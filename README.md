@@ -1,118 +1,111 @@
 # EMS File Format Converter
 
-このリポジトリは、CAE向けメッシュ／ポストデータの簡易コンバータです。サイエンスソリューションズ社（Science Solutions International Laboratory, Inc.; SSIL）の電磁界解析ソフトウェア「EMSolution」で用いるATLASテキストファイルフォーマット（`.atl`）、I‑DEAS Universal file format（`.unv`）、Femap Neutral file format（`.neu`）、Gmsh mesh format（`.msh`）の読み書きに対応し、IDや物性番号などのメタデータのラウンドトリップ保存を重視しています。
+A lightweight converter for CAE mesh and post data. Supports formats used by Science Solutions International Laboratory, Inc. (SSIL) electromagnetic solver "EMSolution": ATLAS test file format (`.atl`), I‑DEAS universal file format (`.unv`), and Femap Neutral file format (`.neu`), focusing on round‑tripping metadata such as IDs and property numbers.
 
-## 特長
-- **対応フォーマット**: ATLAS（メッシュ・ポスト）、UNV（メッシュ・ポスト）、Femap NEU（メッシュ・ポスト）、Gmsh MSH（メッシュ）
-- **メタデータ保持**: Node ID、Element ID、物性番号（`iprop`）を可能な限り保持
-- **CLI**: 単一のCLIから変換・ポスト入出力が可能
-- **ユニバーサルパッケージ**: OS依存のネイティブ拡張を含まない pure Python パッケージ
-- **テスト/CI**: `pytest` 完備、GitHub Actionsで `ubuntu-latest` / `windows-latest` の手動CI実行に対応
-- **PyPI公開**: GitHub Actionsから手動でPyPI公開可能
+## Features
+- **Supported formats**: ATLAS (mesh & post), UNV (mesh & post), Femap NEU (mesh & post)
+- **Metadata preservation**: Node ID, Element ID, and `iprop` when available
+- **CLI**: Single entry point for conversions and post I/O
+- **Universal package**: Pure Python package with no OS-specific native extension
+- **Tests/CI**: `pytest` included; GitHub Actions can run manual CI on `ubuntu-latest` and `windows-latest`
+- **PyPI publishing**: Manual publish to PyPI is supported from GitHub Actions
 
-## インストール
-事前にPython 3.10以上が必要です。
+## Installation
+Requires Python 3.10+.
 
-PyPI からインストールできます。
+Install from PyPI:
 
 ```powershell
 pip install ems-file-format-converter
 ```
 
-Releaseに添付した`whl`（Wheel）ファイルからのインストール、またはローカルビルドも可能です。
+You can also install from a Wheel attached to a Release or build locally:
 
 ```powershell
-# 例: ダウンロードしたWHLをインストール
+# Install from a downloaded Wheel
 pip install --force-reinstall path\to\ems_file_format_converter-0.1.0-py3-none-any.whl
 
-# ソースからビルドしてWHL作成 → インストール
+# Build locally then install
 python -m build
 pip install --force-reinstall dist/ems_file_format_converter-0.1.0-py3-none-any.whl
 ```
 
-## 使い方（CLI）
+## CLI Usage
 
-メッシュ変換（入力は拡張子で自動判別、出力形式は拡張子で判別）:
+Convert meshes (input auto-detected by extension, output format determined by file extension):
 
 ```powershell
 ems-file-format-converter mesh_sample.atl out.unv
 ems-file-format-converter sample_mesh.unv out.atl
-ems-file-format-converter model.neu model.msh --progress
 ```
 
-形式を明示的に指定する場合:
+Explicitly specify formats:
 
 ```powershell
 ems-file-format-converter mesh_sample.dat out.unv --informat atl --outformat unv
 ```
 
-ポストデータの読み書き（モード指定: `components|scalar|vector|vector+scalar`）:
+Post data I/O (mode: `components|scalar|vector|vector+scalar`):
 
 ```powershell
 ems-file-format-converter --post-in post_sample.atl --post-out rt_post.atl --post-mode components
 ```
 
-`--post-mode` の意味:
-- `components`（デフォルト）: すべての成分（component1..N）をそのまま出力（部分的に切り捨てない）
-- `scalar`: component1 のみ出力
-- `vector`: component1..3 を出力（不足分は 0）
-- `vector+scalar`: component1..4 を出力（不足分は 0）
+`--post-mode` meanings:
+- `components` (default): write all components (component1..N) without truncation
+- `scalar`: write component1 only
+- `vector`: write component1..3 (pads missing with 0)
+- `vector+scalar`: write component1..4 (pads missing with 0)
 
-対応拡張子:
+Supported extensions:
 - ATLAS: `.atl`
 - UNV: `.unv`
 - Femap Neutral: `.neu`
-- Gmsh: `.msh`
 
-## Python API（例）
+## Python API (examples)
 
 ```python
-from ems_file_format_converter import read_mesh, write_mesh
-
-# 拡張子から形式を自動判別する統一API
-mesh = read_mesh("sample/mesh_sample.atl")
-write_mesh("out.neu", mesh)
-
-# 大規模なFemap NEUでは読み込み進捗を表示可能
-large_mesh = read_mesh("large_model.neu", progress=True)
-
 from ems_file_format_converter import atlas
+mesh = atlas.read_mesh("sample/mesh_sample.atl")
+atlas.write_mesh("out.atl", mesh)
+
 steps = atlas.read_post("sample/post_sample.atl")
 atlas.write_post("out_post.atl", steps, mode="components")
 ```
 
-UNVやFemap NEUも同様に `ems_file_format_converter.unv` / `ems_file_format_converter.femap` のモジュールを利用できます。
+For UNV and Femap NEU use `ems_file_format_converter.unv` and `ems_file_format_converter.femap` modules respectively.
 
-## テスト
+## Tests
 
 ```powershell
 pytest -q
 ```
 
-## GitHub Actions ワークフロー
+## GitHub Actions Workflow
 
-GitHub Actions の `CI and Publish` ワークフローは手動実行専用です。`push` や `pull_request` では起動しません。
+The `CI and Publish` GitHub Actions workflow is manual-only. It does not run on `push` or `pull_request`.
 
-- GitHub の `Actions` タブから `CI and Publish` を選び、`Run workflow` を実行します。
-- 通常のCI確認では `publish_to_pypi` を `false` にします。
-- この場合、`ubuntu-latest` と `windows-latest` の両方でテストと `python -m build` によるビルド確認を行います。
-- 本パッケージはユニバーサルな pure Python パッケージのため、OSごとに別配布物を作るのではなく、互換性確認のために複数OSで検証しています。
-- 配布物（`sdist` と `py3-none-any` wheel）はUbuntu上で1回だけ生成し、`twine check` を実行します。
+- Open the `Actions` tab in GitHub and run `CI and Publish`.
+- For normal CI validation, leave `publish_to_pypi` set to `false`.
+- The workflow then tests and build-checks the package on both `ubuntu-latest` and `windows-latest`.
+- Since this package is a universal pure Python package, the multi-OS jobs are for compatibility validation rather than producing OS-specific artifacts.
+- After that, it builds the release distributions (`sdist` and `py3-none-any` wheel) once on Ubuntu and runs `twine check`.
 
-## PyPI 公開
+## Publishing to PyPI
 
-PyPI公開も同じワークフローから手動で行います。
+PyPI publication is handled by the same manual workflow.
 
-- あらかじめ `v0.5.1` のような `v*.*.*` 形式のGitタグを作成しておきます。
-- `Run workflow` 実行時は通常どおりデフォルトブランチから起動します。
-- `publish_to_pypi` を `true` にし、`release_tag` に `v0.5.1` のようなタグ名を入力して実行します。
-- ワークフローはそのタグをチェックアウトしてビルドし、ビルド済み配布物をPyPIへ公開します。
-- 公開にはPyPI側で GitHub Actions Trusted Publishing の設定が必要です。
+- Create a Git tag such as `v0.5.1`.
+- In `Run workflow`, start the workflow normally from the default branch.
+- Set `publish_to_pypi` to `true`.
+- Set `release_tag` to the tag name, for example `v0.5.1`.
+- The workflow checks out that tag, builds the distributions, and uploads them to PyPI.
+- PyPI Trusted Publishing must be configured for this GitHub repository in advance.
 
-## ライセンス
+## License
 
-MITライセンスです。`LICENSE` を参照してください。
+MIT License. See `LICENSE`.
 
-## 英語版README
+## 日本語版
 
-英語版は `README_en.md` を参照してください。
+日本語版は [`README_ja.md`](README_ja.md) を参照してください。
